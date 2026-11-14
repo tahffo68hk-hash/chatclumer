@@ -159,6 +159,17 @@ git status --short
 
 ## 当前提交
 
-生命周期修复与交接在同一提交。完整哈希见下一行；若其后只有记下哈希的修订，以 `git rev-parse HEAD` 为准。
+生命周期修复在：
 
-`PENDING`
+`7fd2e7f679d08a5684df0089c53a645196c901f9`
+
+若其后只有记下这个哈希的修订，包和 bundle 对应的是 `git rev-parse HEAD`。核对：
+
+```bash
+git rev-parse HEAD
+git log -1 --oneline
+git merge-base --is-ancestor 7fd2e7f679d08a5684df0089c53a645196c901f9 HEAD && echo ancestor-ok
+git status --short
+```
+
+`ancestor-ok` 且工作区为空，就是这份交付。源码 zip 没有 `.git`，用 bundle 还原后再执行上面的命令。
