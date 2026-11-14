@@ -201,7 +201,11 @@ git status --short
 
 分组和网页桥提交后，用下面的命令核对。若其后只有记下哈希的修订，以 `git rev-parse HEAD` 为准，并确认功能提交仍是祖先。
 
-元宝新输入区和登录层在：
+元宝 A/B 读回在：
+
+`a847146d5b6864bb20531cf54294b73526829f90`
+
+元宝新输入区和登录层仍是祖先：
 
 `2c5fe1aa64fcafe4fd92f8f1414f1bdd2177a413`
 
@@ -230,7 +234,7 @@ git status --short
 ```bash
 git rev-parse HEAD
 git log -1 --oneline
-git merge-base --is-ancestor 2c5fe1aa64fcafe4fd92f8f1414f1bdd2177a413 HEAD && echo ancestor-ok
+git merge-base --is-ancestor a847146d5b6864bb20531cf54294b73526829f90 HEAD && echo ancestor-ok
 git status --short
 ```
 
