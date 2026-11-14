@@ -136,9 +136,10 @@ class WebBridge:
 
     def note_tabs(self, tabs: list[dict]) -> dict:
         updated = 0
+        sessions: set[str] = set()
         with self.db._lock:
             rows = self.db.conn.execute(
-                "SELECT id, web_tab_key, web_origin FROM members WHERE provider='web'"
+                "SELECT id, session_id, web_tab_key, web_origin FROM members WHERE provider='web'"
             ).fetchall()
             now = now_iso()
             for beat in tabs:
@@ -161,8 +162,10 @@ class WebBridge:
                             (row["id"],),
                         )
                     updated += 1
+                    if row["session_id"]:
+                        sessions.add(row["session_id"])
             self.db.conn.commit()
-        return {"ok": True, "updated": updated}
+        return {"ok": True, "updated": updated, "session_ids": sorted(sessions)}
 
     def site_blocked(self, site: str) -> str | None:
         with self.db._lock:

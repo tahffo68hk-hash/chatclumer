@@ -43,7 +43,24 @@ document.getElementById("bind").addEventListener("click", async () => {
     return;
   }
   rememberFields();
+  const memberId = document.getElementById("member").value.trim();
   const tabKey = document.getElementById("tabkey").value.trim();
+  if (!memberId) {
+    document.getElementById("status").textContent = "先填写成员 ID";
+    return;
+  }
+  const { pairToken } = await chrome.storage.local.get(["pairToken"]);
+  if (!pairToken) {
+    document.getElementById("status").textContent = "先配对";
+    return;
+  }
+  const found = await fetch(`${BACKEND}/api/ext/members/${encodeURIComponent(memberId)}`, {
+    headers: { Authorization: `Bearer ${pairToken}` },
+  });
+  if (found.status === 404) {
+    document.getElementById("status").textContent = "成员 ID 不存在";
+    return;
+  }
   if (!tabKey) {
     document.getElementById("status").textContent = "先在房间里复制这个成员的绑定键";
     return;

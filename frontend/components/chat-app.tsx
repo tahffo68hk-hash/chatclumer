@@ -59,6 +59,31 @@ function downloadRoom(kind: "md" | "json", sessionId: string | null, messages: C
   URL.revokeObjectURL(link.href);
 }
 
+function downloadHighlights(cards: HighlightCard[]) {
+  const body = [
+    "# 收藏",
+    "",
+    "收藏的是讨论里的原话和备注，不是已核实事实。",
+    "",
+    ...cards.flatMap((card) => [
+      `## ${card.title}`,
+      "",
+      `${card.nickname || "房间"}：${card.excerpt}`,
+      "",
+      `备注：${card.note || "无"}`,
+      "",
+      card.disclaimer,
+      "",
+    ]),
+  ].join("\n");
+  const blob = new Blob([body], { type: "text/markdown" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = "highlights.md";
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
 function shownModel(message: ChatMessage) {
   const id = message.model_id || "";
   if (!id || id.startsWith("web:") || id.includes("未能核验")) return "未能核验精确 model ID";
@@ -262,6 +287,10 @@ export function ChatApp() {
       const data = JSON.parse((event as MessageEvent).data) as ChatMessage;
       setMessages((list) => upsert(list, data));
     });
+    source.addEventListener("members", (event) => {
+      const data = JSON.parse((event as MessageEvent).data) as Member[];
+      if (Array.isArray(data)) setMembers(data);
+    });
     source.onerror = () => {
       setLink("down");
       source.close();
@@ -269,17 +298,31 @@ export function ChatApp() {
     return () => source.close();
   }, [currentId]);
 
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
+
   useEffect(() => {
     if (!currentId) return;
+    let stop = false;
+    const refreshMembers = () => {
+      api.session(currentId).then((detail) => {
+        if (!stop) setMembers(detail.members);
+      }).catch(() => undefined);
+    };
+    refreshMembers();
     const timer = window.setInterval(() => {
-      api.session(currentId).then((detail) => setMembers(detail.members)).catch(() => undefined);
-      if (!session || session.status === "running" || session.status === "paused") {
+      refreshMembers();
+      const current = sessionRef.current;
+      if (!current || current.status === "running" || current.status === "paused") {
         loadRoom(currentId).catch(() => undefined);
         loadList().catch(() => undefined);
       }
     }, 2000);
-    return () => window.clearInterval(timer);
-  }, [currentId, loadList, loadRoom, session]);
+    return () => {
+      stop = true;
+      window.clearInterval(timer);
+    };
+  }, [currentId, loadList, loadRoom]);
 
   useEffect(() => {
     const storedTheme = localStorage.getItem("room-theme");
@@ -901,6 +944,7 @@ export function ChatApp() {
             <DialogTitle>收藏</DialogTitle>
             <DialogDescription>这些卡片只保留原话和你的备注。它们不是已核实事实。</DialogDescription>
           </DialogHeader>
+          <Button size="sm" variant="outline" data-testid="export-highlights" onClick={() => downloadHighlights(highlights)}>导出全部收藏</Button>
           {highlights.length === 0 && <p data-testid="cards-empty">还没有收藏。</p>}
           <div className="grid gap-3">
             {highlights.map((card) => (
@@ -1013,9 +1057,9 @@ export function ChatApp() {
           <ol className="list-decimal space-y-2 pl-4 text-sm leading-6" data-testid="connect-steps">
             <li>在设置里生成本机配对码，粘贴到扩展弹窗并点配对。令牌只留在扩展里，不会进聊天。</li>
             <li>在成员里添加「网页会话」。选来源，填写页面地址和绑定键。需要房间代发时打开受控自动发送，然后保存。</li>
-            <li>保存后卡片是「已配置，等待扩展绑定」。扩展绑定当前标签页并保持打开，心跳到达后才变成「已绑定标签页」。大约 20 秒没有心跳则是「掉线」。</li>
+            <li>保存后卡片是「已配置，等待扩展绑定」。扩展绑定当前标签页并保持打开，心跳到达后卡片会自己变成「已绑定标签页」，不用刷新页面。大约 20 秒没有心跳则是「掉线」。</li>
             <li>用普通 Chrome 打开那个页面。扩展弹窗填同一组 ID 和绑定键，点绑定当前标签页。元宝、智谱等要在这时允许该站点，扩展才会装上内容脚本。</li>
-            <li>夹具地址是 http://127.0.0.1:43124/fixture/chat 。Gemini 游客页可以绑定。元宝和智谱可以保存绑定，但公开回复的正文位置还没核实，房间不会自动点击发送。</li>
+            <li>夹具地址是 http://127.0.0.1:43124/fixture/chat 。Gemini 游客页可以绑定。元宝只在房间发出发送指令、且输入框容器里的 Send 可用时才点一次。智谱不会自动点击发送。</li>
           </ol>
         </DialogContent>
       </Dialog>

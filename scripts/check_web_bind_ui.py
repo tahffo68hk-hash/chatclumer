@@ -1,5 +1,7 @@
 """Fill the member dialog and confirm it calls web-bind. Does not open Gemini or Yuanbao."""
 
+import json
+
 from playwright.sync_api import sync_playwright
 
 BASE = "http://127.0.0.1:43123"
@@ -57,7 +59,22 @@ def main() -> None:
         page.get_by_test_id("open-cards").click()
         card = page.get_by_test_id("highlight-card").inner_text()
         assert "不是已核实事实" in card
+        assert page.get_by_test_id("export-highlights").inner_text() == "导出全部收藏"
         page.keyboard.press("Escape")
+        code = page.request.post(f"{BASE}/backend/api/ext/code").json()["code"]
+        token = page.request.post(
+            f"{BASE}/backend/api/ext/pair",
+            data=json.dumps({"code": code}),
+            headers={"Content-Type": "application/json"},
+        ).json()["token"]
+        beat = page.request.post(
+            f"{BASE}/backend/api/ext/tabs",
+            data=json.dumps({"tabs": [{"tab_key": "fixture-from-ui", "origin": "http://127.0.0.1:43124", "alive": True}]}),
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        )
+        assert beat.ok
+        page.get_by_test_id("bind-status").filter(has_text="已绑定标签页").wait_for(timeout=10000)
+        assert page.get_by_test_id("bind-status").inner_text() == "已绑定标签页"
         page.get_by_test_id("open-settings").click()
         page.get_by_test_id("theme-select").select_option("dark")
         page.keyboard.press("Escape")

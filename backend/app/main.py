@@ -426,7 +426,19 @@ def create_app(db_path: str | None = None, secrets_path: str | None = None, prov
     def ext_tabs(body: TabsIn, request: Request, authorization: str | None = Header(None)):
         _ext_same_machine(request)
         _require_ext(authorization)
-        return bridge.note_tabs([item.model_dump() for item in body.tabs])
+        result = bridge.note_tabs([item.model_dump() for item in body.tabs])
+        for session_id in result.get("session_ids") or []:
+            room.publish(session_id, "members", database.list_members(session_id))
+        return result
+
+    @app.get("/api/ext/members/{member_id}")
+    def ext_member(member_id: str, request: Request, authorization: str | None = Header(None)):
+        _ext_same_machine(request)
+        _require_ext(authorization)
+        member = database.get_member(member_id)
+        if not member:
+            raise HTTPException(404, "成员 ID 不存在")
+        return {"id": member["id"], "provider": member.get("provider") or "", "web_tab_key": member.get("web_tab_key") or ""}
 
     @app.post("/api/sessions/{session_id}/groups/preview")
     def preview_group(session_id: str, body: GroupIn):
@@ -838,6 +850,8 @@ def create_app(db_path: str | None = None, secrets_path: str | None = None, prov
                     try:
                         item = await asyncio.wait_for(queue.get(), timeout=12)
                     except asyncio.TimeoutError:
+                        members = database.list_members(session_id)
+                        yield f"event: members\ndata: {json.dumps(members, ensure_ascii=False)}\n\n"
                         yield "event: ping\ndata: {}\n\n"
                         continue
                     data = item["data"]

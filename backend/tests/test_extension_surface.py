@@ -24,6 +24,9 @@ def test_optional_hosts_do_not_get_a_static_content_script():
     assert "document.body" not in yuanbao_js
     assert "yuanbaoDispatchSend" in yuanbao_js
     assert "已填入，未发送" in yuanbao_js
+    assert "insertText" in yuanbao_js
+    assert "data-recommend" in yuanbao_js
+    assert "成员 ID 不存在" in popup
     assert "yuanbaoDispatchSend" in content
     assert "clearIfUnsent" in content
     remembered = popup.split("function rememberFields", 1)[1].split("}", 1)[0]

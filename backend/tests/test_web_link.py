@@ -64,6 +64,9 @@ def test_extension_tab_heartbeat_rejects_another_site(tmp_path):
         json={"tabs": []},
     )
     assert denied.status_code == 403
+    missing = client.get("/api/ext/members/does-not-exist", headers={"Authorization": f"Bearer {token}"})
+    assert missing.status_code == 404
+    assert missing.json()["detail"] == "成员 ID 不存在"
 
 
 def test_unbound_tab_does_not_send_and_progress_replaces_the_waiting_line(tmp_path):

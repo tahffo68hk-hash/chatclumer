@@ -135,26 +135,145 @@ def test_yuanbao_reader_takes_only_the_new_ai_bubble():
               return yuanbaoDispatchSend(document, "请用一句话给一个读书建议。", 200);
             }"""
         )
-        mismatch = page.evaluate(
-            """() => yuanbaoDispatchSend(document, "另一句", 200)"""
-        )
-        entered = page.evaluate(
-            """() => {
-              const send = document.querySelector("[aria-label=Send]");
-              send.setAttribute("aria-disabled", "true");
-              const editor = document.querySelector(".ql-editor");
-              editor.addEventListener("keydown", (event) => {
-                if (event.key !== "Enter") return;
-                const row = document.createElement("div");
-                row.className = "agent-chat__list__item--human";
-                document.body.appendChild(row);
-              });
-              return yuanbaoDispatchSend(document, "请用一句话给一个读书建议。", 500);
-            }"""
-        )
         browser.close()
     assert sent["ok"] is True
     assert quiet["ok"] is False
     assert quiet["detail"] == "已填入，未发送"
-    assert mismatch["detail"] == "输入框内容和待发文本不一致，没有点击发送"
-    assert entered["ok"] is True
+
+
+def test_editor_state_not_dom_text_enables_send_and_cards_are_not_clicked():
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(channel="chrome", headless=True)
+        page = browser.new_page()
+        page.set_content(
+            """
+            <div id="composer-box">
+              <div class="ql-editor" contenteditable="true" data-placeholder="发消息"></div>
+              <button type="button" id="real-send" aria-label="Send" disabled>发送</button>
+            </div>
+            <button type="button" data-recommend aria-label="发送">高层腰线层住宅优缺点有哪些？</button>
+            <button type="button" data-recommend>做暖冬菌菇汤</button>
+            """
+        )
+        page.evaluate(
+            """() => {
+              const editor = document.querySelector(".ql-editor");
+              const send = document.querySelector("#real-send");
+              let model = "";
+              window.__cards = 0;
+              window.__sends = 0;
+              document.querySelectorAll("[data-recommend]").forEach((button) => {
+                button.addEventListener("click", () => { window.__cards += 1; });
+              });
+              send.addEventListener("click", () => {
+                window.__sends += 1;
+                if (!model.trim()) return;
+                const row = document.createElement("div");
+                row.className = "agent-chat__list__item--human";
+                row.textContent = model;
+                document.body.appendChild(row);
+              });
+              editor.addEventListener("beforeinput", (event) => {
+                if (event.inputType === "deleteContentBackward") model = "";
+                if (event.inputType === "insertText") model = event.data || "";
+                editor.textContent = model;
+              });
+              editor.addEventListener("input", () => {
+                const current = document.querySelector("#real-send");
+                if (current) current.disabled = model.trim().length === 0;
+              });
+              document.execCommand = (command, _ui, value) => {
+                if (command === "insertText") editor.textContent = String(value || "");
+                return true;
+              };
+              editor.textContent = "请用一句话给一个读书建议。";
+              window.__model = () => model;
+            }"""
+        )
+        untouched = page.evaluate("() => document.querySelector('#real-send').disabled")
+        page.add_script_tag(path=str(ROOT / "extension" / "yuanbao.js"))
+        sent = page.evaluate(
+            """() => yuanbaoDispatchSend(document, "请用一句话给一个读书建议。", 800)"""
+        )
+        counts = page.evaluate("() => ({ cards: window.__cards, sends: window.__sends, model: window.__model() })")
+        quiet = page.evaluate(
+            """() => {
+              const send = document.querySelector("#real-send");
+              const fresh = send.cloneNode(true);
+              fresh.id = "real-send";
+              send.replaceWith(fresh);
+              return yuanbaoDispatchSend(document, "请用一句话给一个读书建议。\\n", 250);
+            }"""
+        )
+        cleared = page.evaluate("() => window.__model()")
+        again = page.evaluate(
+            """() => {
+              document.querySelector("#real-send").addEventListener("click", () => {
+                window.__sends += 1;
+                const row = document.createElement("div");
+                row.className = "agent-chat__list__item--human";
+                document.body.appendChild(row);
+              });
+              return yuanbaoDispatchSend(document, "另一句建议。", 800);
+            }"""
+        )
+        final_model = page.evaluate("() => window.__model()")
+        browser.close()
+    assert untouched is True
+    assert sent["ok"] is True
+    assert counts["cards"] == 0
+    assert counts["sends"] == 1
+    assert counts["model"] == "请用一句话给一个读书建议。"
+    assert quiet["detail"] == "已填入，未发送"
+    assert cleared == ""
+    assert again["ok"] is True
+    assert final_model == "另一句建议。"
+    assert "残留" not in final_model
+
+
+def test_binding_and_heartbeat_do_not_click_recommendation_cards():
+    background = (ROOT / "extension" / "background.js").read_text()
+    beat = background.split("async function beat", 1)[1].split("async function poll", 1)[0]
+    ensure = background.split("async function ensureScript", 1)[1].split("chrome.runtime.onMessage", 1)[0]
+    assert ".click(" not in beat and "KeyboardEvent" not in beat and "dispatchEvent" not in beat
+    assert ".click(" not in ensure and "KeyboardEvent" not in ensure and "dispatchEvent" not in ensure
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(channel="chrome", headless=True)
+        page = browser.new_page()
+        page.clock.install()
+        page.route(
+            "http://127.0.0.1:43124/card-fixture",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="text/html",
+                body="""
+                <button type="button" data-recommend>高层腰线层住宅优缺点有哪些？</button>
+                <button type="button" data-recommend aria-label="发送">做暖冬菌菇汤</button>
+                <div id="composer-box"><div class="ql-editor" contenteditable="true" data-placeholder="发消息"></div></div>
+                """,
+            ),
+        )
+        page.goto("http://127.0.0.1:43124/card-fixture")
+        page.evaluate(
+            """() => {
+              window.__cards = 0;
+              document.querySelectorAll("[data-recommend]").forEach((button) => {
+                button.addEventListener("click", () => { window.__cards += 1; });
+              });
+              window.chrome = {
+                runtime: {
+                  onMessage: { addListener() {}, removeListener() {} },
+                  sendMessage() {},
+                  lastError: null,
+                },
+              };
+            }"""
+        )
+        page.add_script_tag(path=str(ROOT / "extension" / "yuanbao.js"))
+        page.add_script_tag(path=str(ROOT / "extension" / "content.js"))
+        page.clock.fast_forward(60_000)
+        clicks = page.evaluate("() => window.__cards")
+        installed = page.evaluate("() => globalThis.__roomBridge === true")
+        browser.close()
+    assert installed is True
+    assert clicks == 0

@@ -148,9 +148,17 @@ function clearIfUnsent(box, prompt) {
   if (current !== String(prompt || "").trim()) return;
   box.focus();
   if (box.isContentEditable) {
-    document.execCommand("selectAll", false, null);
+    if (typeof yuanbaoClearComposer === "function" && siteFrom(location.href) === "yuanbao") {
+      yuanbaoClearComposer(box);
+      return;
+    }
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(box);
+    selection.removeAllRanges();
+    selection.addRange(range);
     document.execCommand("delete", false, null);
-    box.textContent = "";
+    box.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, cancelable: true, inputType: "deleteContentBackward" }));
     box.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContentBackward" }));
     return;
   }
@@ -215,7 +223,7 @@ async function runJob(job) {
     const box = adapter.composer();
     if (!box) return { status: "error", detail: "找不到输入框", page_url: pageUrl };
     if (signal.cancelled || job.action === "cancel") return { ...cancelResult(), page_url: pageUrl };
-    fillComposer(box, job.prompt);
+    if (site !== "yuanbao") fillComposer(box, job.prompt);
     remember(job.request_id);
     let posted = false;
     if (typeof yuanbaoDispatchSend === "function" && site === "yuanbao") {
