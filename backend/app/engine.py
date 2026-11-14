@@ -174,14 +174,31 @@ class RoomEngine:
             session = self.db.get_session(session_id)
             run_token = new_id()
             started = datetime.now(timezone.utc)
-            deadline = started + timedelta(seconds=float(session["max_seconds"]))
+            keep_parent = (session.get("layout") == "branches") and bool(session.get("parent_started_at"))
+            if keep_parent:
+                deadline_at = session["parent_deadline_at"]
+                deadline_dt = datetime.fromisoformat(deadline_at)
+                remaining = (deadline_dt - datetime.now(timezone.utc)).total_seconds()
+            else:
+                deadline_dt = started + timedelta(seconds=float(session["max_seconds"]))
+                deadline_at = deadline_dt.isoformat()
+                remaining = float(session["max_seconds"])
             self.db.insert_run(session_id, run_token, session["mode"], trigger_message_id)
-            if not self.db.begin_run(session_id, run_token, session["mode"], started.isoformat(), deadline.isoformat()):
+            if not self.db.begin_run(
+                session_id,
+                run_token,
+                session["mode"],
+                started.isoformat(),
+                deadline_at,
+                reset_budget=not keep_parent,
+            ):
                 return {"ok": False, "error": "could_not_start"}
+            if not keep_parent and session.get("layout") == "branches":
+                self.db.remember_parent_budget(session_id, started.isoformat(), deadline_at)
             cancel = asyncio.Event()
             self.cancels[session_id] = cancel
             self.stales[session_id] = set()
-            self.deadlines[session_id] = time.monotonic() + float(session["max_seconds"])
+            self.deadlines[session_id] = time.monotonic() + max(0.0, remaining)
             self.tasks[session_id] = asyncio.create_task(self._run(session_id, run_token, cancel))
             self.publish_state(session_id)
             return {"ok": True, "already": False, "run_token": run_token}
@@ -620,12 +637,15 @@ class RoomEngine:
         member_ids: list[str],
         carry: str,
         message_ids: list[str] | None = None,
+        web_memory: str = "rebind",
     ) -> dict:
         group = self.db.get_group(group_id)
         if not group or group["session_id"] != session_id:
             return {"ok": False, "error": "missing_group"}
         if carry not in {"public", "fresh"}:
             return {"ok": False, "error": "bad_carry"}
+        if web_memory not in {"rebind", "retain"}:
+            return {"ok": False, "error": "bad_web_memory"}
         if not member_ids or any(mid not in group["member_ids"] for mid in member_ids):
             return {"ok": False, "error": "bad_members"}
         if set(member_ids) == set(group["member_ids"]):
@@ -654,11 +674,17 @@ class RoomEngine:
             context_version=version,
             run_token=session.get("run_token"),
         )
-        if carry == "fresh":
-            for mid in member_ids:
-                member = self.db.get_member(mid)
-                if member and member["provider"] == "web":
-                    self.db.update_member(mid, {"web_conversation": "needs_new"})
+        for mid in member_ids:
+            member = self.db.get_member(mid)
+            if not member or member.get("provider") != "web":
+                continue
+            if web_memory == "retain":
+                self.db.update_member(mid, {"web_conversation": "retain"})
+            else:
+                self.db.update_member(
+                    mid,
+                    {"web_conversation": "needs_rebind", "web_tab_key": "", "web_auto": False},
+                )
         self._pulse_stale(session_id)
         self._cancel_web_members(member_ids, "group_changed")
         self.publish_state(session_id)
@@ -922,7 +948,9 @@ class RoomEngine:
         request.web_tab_key = member.get("web_tab_key") or ""
         request.web_model_label = member.get("web_model_label") or ""
         request.web_auto = bool(member.get("web_auto"))
-        request.web_open_new = (member.get("web_conversation") or "") == "needs_new"
+        request.web_conversation = member.get("web_conversation") or ""
+        request.web_open_new = False
+        request.token_cap_set = session.get("max_tokens") is not None
         request.prompt = web_forward_text(request) if member.get("provider") == "web" else render_prompt(request)
         preflight = getattr(self.provider, "preflight", None)
         if preflight:
@@ -1085,6 +1113,12 @@ class RoomEngine:
             self.publish_state(session_id)
 
     def _apply_usage(self, session_id: str, request: GenRequest, text: str, reserved_prompt: int = 0) -> None:
+        if request.provider == "web":
+            self.db.mark_tokens_unknown(session_id)
+            request.usage.prompt_tokens = 0
+            request.usage.completion_tokens = 0
+            request.usage.cost_known = False
+            return
         if request.usage.completion_tokens == 0 and text:
             request.usage.completion_tokens = len(text)
         if request.usage.prompt_tokens == 0 and request.prompt:

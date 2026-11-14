@@ -51,11 +51,12 @@ export const api = {
     ),
   merge: (id: string, member_ids: string[]) =>
     request(`/api/sessions/${id}/groups/merge`, { method: "POST", body: JSON.stringify({ member_ids }) }),
-  split: (id: string, group_id: string, member_ids: string[], carry: "public" | "fresh") =>
+  split: (id: string, group_id: string, member_ids: string[], carry: "public" | "fresh", web_memory: "rebind" | "retain" = "rebind") =>
     request(`/api/sessions/${id}/groups/${group_id}/split`, {
       method: "POST",
-      body: JSON.stringify({ member_ids, carry }),
+      body: JSON.stringify({ member_ids, carry, web_memory }),
     }),
+  pairCode: () => request<{ code: string; expires_at: string }>("/api/ext/code", { method: "POST" }),
   pause: (id: string) => request(`/api/sessions/${id}/pause`, { method: "POST" }),
   resume: (id: string) => request(`/api/sessions/${id}/resume`, { method: "POST" }),
   stop: (id: string) => request(`/api/sessions/${id}/stop`, { method: "POST" }),

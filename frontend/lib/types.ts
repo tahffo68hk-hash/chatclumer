@@ -19,6 +19,7 @@ export type Session = {
   current_round: number;
   ai_message_count: number;
   run_tokens: number;
+  run_tokens_known?: boolean;
   run_cost_usd: number;
   run_cost_known: boolean;
   total_tokens: number;

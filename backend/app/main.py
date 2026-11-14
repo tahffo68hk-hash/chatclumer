@@ -9,7 +9,7 @@ import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
@@ -31,8 +31,18 @@ FIXTURE_HTML = """<!doctype html>
 <div id="thread"></div>
 <textarea id="composer" placeholder="写一句"></textarea>
 <button id="send" type="button">发送</button>
+<button id="stop" type="button" aria-label="Stop response" hidden>停止</button>
 <script>
 const thread = document.getElementById("thread");
+const stop = document.getElementById("stop");
+let timer = null;
+stop.addEventListener("click", () => {
+  if (timer) clearInterval(timer);
+  timer = null;
+  stop.hidden = true;
+  const bot = thread.querySelector("[data-role=assistant][data-state=streaming]");
+  if (bot) bot.dataset.state = "stopped";
+});
 document.getElementById("send").addEventListener("click", () => {
   const text = document.getElementById("composer").value.trim();
   if (!text) return;
@@ -46,16 +56,19 @@ document.getElementById("send").addEventListener("click", () => {
   bot.dataset.state = "streaming";
   bot.textContent = "";
   thread.appendChild(bot);
+  stop.hidden = false;
   const reply = "夹具收到：" + text;
   let i = 0;
-  const timer = setInterval(() => {
-    i += 4;
+  timer = setInterval(() => {
+    i += 2;
     bot.textContent = reply.slice(0, i);
     if (i >= reply.length) {
       clearInterval(timer);
+      timer = null;
+      stop.hidden = true;
       bot.dataset.state = "complete";
     }
-  }, 30);
+  }, 80);
 });
 </script>
 </body></html>"""
@@ -162,6 +175,7 @@ class GroupIn(BaseModel):
     member_ids: list[str] = Field(default_factory=list)
     message_ids: list[str] | None = None
     carry: str = "fresh"
+    web_memory: str = "rebind"
 
 
 class BindIn(BaseModel):
@@ -331,12 +345,24 @@ def create_app(db_path: str | None = None, secrets_path: str | None = None, prov
     def ext_sites():
         return {"sites": SITE_STATUS}
 
+    def _ext_same_machine(request: Request) -> None:
+        origin = request.headers.get("origin")
+        if not origin:
+            return
+        if origin.startswith("chrome-extension://"):
+            return
+        if origin in {"http://127.0.0.1:43123", "http://localhost:43123"}:
+            return
+        raise HTTPException(403, "配对接口拒绝这个网页来源")
+
     @app.post("/api/ext/code")
-    def ext_code():
+    def ext_code(request: Request):
+        _ext_same_machine(request)
         return bridge.issue_code()
 
     @app.post("/api/ext/pair")
-    def ext_pair(body: PairIn):
+    def ext_pair(body: PairIn, request: Request):
+        _ext_same_machine(request)
         token = bridge.pair(body.code)
         if not token:
             raise HTTPException(401, "配对码无效或已用过")
@@ -347,12 +373,14 @@ def create_app(db_path: str | None = None, secrets_path: str | None = None, prov
             raise HTTPException(401, "配对无效")
 
     @app.get("/api/ext/jobs")
-    def ext_jobs(authorization: str | None = Header(None)):
+    def ext_jobs(request: Request, authorization: str | None = Header(None)):
+        _ext_same_machine(request)
         _require_ext(authorization)
         return {"jobs": bridge.claim_jobs()}
 
     @app.post("/api/ext/jobs/result")
-    def ext_result(body: JobResultIn, authorization: str | None = Header(None)):
+    def ext_result(body: JobResultIn, request: Request, authorization: str | None = Header(None)):
+        _ext_same_machine(request)
         _require_ext(authorization)
         return bridge.finish_job(body.model_dump())
 
@@ -381,7 +409,9 @@ def create_app(db_path: str | None = None, secrets_path: str | None = None, prov
 
     @app.post("/api/sessions/{session_id}/groups/{group_id}/split")
     async def split_group(session_id: str, group_id: str, body: GroupIn):
-        result = await room.split_group(session_id, group_id, body.member_ids, body.carry, body.message_ids)
+        result = await room.split_group(
+            session_id, group_id, body.member_ids, body.carry, body.message_ids, body.web_memory
+        )
         if not result.get("ok"):
             raise HTTPException(400, result.get("error") or "无法拆分")
         return result
@@ -408,6 +438,10 @@ def create_app(db_path: str | None = None, secrets_path: str | None = None, prov
             raise HTTPException(400, "来源和站点不一致，拒绝绑定")
         if not body.web_tab_key.strip() or len(body.web_tab_key) > 80:
             raise HTTPException(400, "需要这个标签页自己的绑定键")
+        tab_key = body.web_tab_key.strip()
+        for other in database.list_members(member["session_id"]):
+            if other["id"] != member_id and (other.get("web_tab_key") or "") == tab_key:
+                raise HTTPException(400, "两个成员不能共用同一个网页标签")
         label = (body.web_model_label or "").strip() or "未能核验精确 model ID"
         updated = database.update_member(
             member_id,

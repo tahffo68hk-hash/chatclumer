@@ -20,7 +20,7 @@ document.getElementById("pair").addEventListener("click", async () => {
 document.getElementById("bind").addEventListener("click", async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   const origin = new URL(tab.url).origin;
-  const allowed = ["http://127.0.0.1:43124", "https://gemini.google.com", "https://chat.qwen.ai", "https://chatgpt.com", "https://chat.openai.com", "https://claude.ai", "https://grok.com", "https://chat.deepseek.com"];
+  const allowed = ["http://127.0.0.1:43124", "https://gemini.google.com", "https://chat.qwen.ai", "https://chatgpt.com", "https://chat.openai.com", "https://claude.ai", "https://grok.com", "https://chat.deepseek.com", "https://yuanbao.tencent.com", "https://chatglm.cn", "https://www.doubao.com"];
   if (!allowed.includes(origin)) {
     document.getElementById("status").textContent = "这个站点不在允许列表";
     return;

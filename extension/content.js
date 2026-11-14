@@ -66,7 +66,7 @@ async function waitNew(adapter, before, signal) {
   let last = "";
   let stable = 0;
   for (let i = 0; i < 80; i += 1) {
-    if (signal.cancelled) return { status: "cancelled" };
+    if (signal.cancelled) return cancelResult();
     const nodes = adapter.assistants();
     const fresh = nodes.filter((_, index) => snapshot(adapter)[index] !== before[index] || index >= before.length);
     const node = fresh[fresh.length - 1];
@@ -84,6 +84,27 @@ async function waitNew(adapter, before, signal) {
     await new Promise((resolve) => setTimeout(resolve, 400));
   }
   return { status: "error", detail: "没有等到新的助手回复" };
+}
+
+function clickSiteStop() {
+  const labels = new Set(["Stop", "Stop response", "Stop Answering", "停止", "停止生成", "停止回答", "停止对话"]);
+  const el = [...document.querySelectorAll("button")].find((node) => {
+    return labels.has(node.getAttribute("aria-label") || "") && !dangerous(node) && !node.hidden;
+  });
+  if (!el) return false;
+  el.click();
+  return true;
+}
+
+function cancelResult() {
+  const stopped = clickSiteStop();
+  return {
+    status: "cancelled",
+    detail: stopped
+      ? "已点击源站停止"
+      : "源站没有可确认的停止按钮，页面可能继续生成，本应用不会再发送",
+    page_url: location.origin + location.pathname,
+  };
 }
 
 function fillComposer(box, prompt) {
@@ -132,7 +153,7 @@ async function runJob(job) {
     const before = snapshot(adapter);
     const box = adapter.composer();
     if (!box) return { status: "error", detail: "找不到输入框", page_url: pageUrl };
-    if (signal.cancelled || job.action === "cancel") return { status: "cancelled", page_url: pageUrl };
+    if (signal.cancelled || job.action === "cancel") return { ...cancelResult(), page_url: pageUrl };
     fillComposer(box, job.prompt);
     let send = null;
     for (let i = 0; i < 10; i += 1) {
@@ -142,10 +163,16 @@ async function runJob(job) {
       await new Promise((resolve) => setTimeout(resolve, 200));
     }
     if (!send) return { status: "error", detail: "找不到安全的发送按钮", page_url: pageUrl };
-    if (signal.cancelled) return { status: "cancelled", page_url: pageUrl };
+    if (signal.cancelled) return { ...cancelResult(), page_url: pageUrl };
     remember(job.request_id);
     send.click();
     const result = await waitNew(adapter, before, signal);
+    if (result.status === "cancelled" && !String(result.detail || "").includes("停止")) {
+      const stopped = clickSiteStop();
+      result.detail = stopped
+        ? "已点击源站停止"
+        : "源站没有可确认的停止按钮，页面可能继续生成，本应用不会再发送";
+    }
     result.model_label = adapter.model() || "未能核验精确 model ID";
     result.page_url = pageUrl;
     return result;

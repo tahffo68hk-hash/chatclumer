@@ -84,7 +84,9 @@ bash scripts/start.sh
 | QQ / 个人微信 | 未接通 |
 | 独立分支、合并预览、拆分 | 页面可用。演示回复仍标明非真实模型 |
 | 本地夹具网页成员 | 扩展 → 本机桥 → 房间已跑通。夹具不是真实模型 |
-| Gemini 游客网页 | 2026-11-14 扩展回路通过，页面显示 Flash-Lite。不保证额度 |
+| Gemini 游客网页 | 2026-11-15 01:30 CST 扩展回路通过，页面显示 Flash-Lite。另一成员是演示模型 |
+| 元宝 / 智谱 | 协调方另一台浏览器有人工双轮。本机元宝一点发送就回到登录，智谱停在手机号登录。都不是扩展回路 |
+| 设置 | 房间标题旁的「设置」：浅色/深色/跟随系统、字号、导出、本机配对码 |
 | Qwen 网页 | 停在年龄确认，没有读到回复 |
 | ChatGPT / Claude / DeepSeek 网页 | BLOCKED，没有绕过 |
 | Grok 网页 | 登录墙，没有当成游客 |
@@ -99,9 +101,9 @@ bash scripts/start.sh
 
 ## 分组与网页验收
 
-2026-11-14 在这台机器上做的，清单如下。
+记录里的 UTC 已换成北京时间。2026-11-14T17:30:36Z 是 2026-11-15 01:30:36 CST。清单如下。
 
-- 旧的 21 个测试仍在。分组和扩展协议加上之后，`cd backend && .venv/bin/pytest -q` 是 26 passed。
+- 旧的 21 个测试仍在。加上分组、预算不重置、token 上限拒绝网页、拆分解除标签、来源拒绝和夹具停止按钮后，`cd backend && .venv/bin/pytest -q` 是 29 passed。
 - 浏览器：`backend/.venv/bin/python scripts/check_branch_ui.py` 通过。预览里有勾选的两人，没有未勾选的第三人；合并后能选择发给哪一组；拆分后刷新，状态不是进行中。
 - 扩展：品牌版 Chrome 157 不接受 `--load-extension`。Chrome for Testing 加载 `extension/` 后，`scripts/check_web_bridge.py` 的夹具和 Gemini 都是 passed。夹具第二次提交含「公开答复」，停止后仍是 2 条用户气泡，房间里有 2 条完成回复，模型名是「Fixture 本地」。
 - Gemini：https://gemini.google.com/app ，游客，页面显示 Flash-Lite。扩展先发送「请用中文给两条简短读书建议，每条一句话。」，房间记下两条建议；合并后再把选中的公开答复发进同一个页面，房间记下第二条回复；停止后 4 秒内没有新的助手消息。没有点登录、订阅或模式切换。
@@ -117,6 +119,10 @@ bash scripts/start.sh
 - [夹具扩展回路](docs/screenshots/fixture-bridge.png)
 - [Gemini 扩展回路](docs/screenshots/gemini-bridge.png)
 - [Qwen 停在年龄确认](docs/screenshots/qwen-manual.png)
+- [设置，深色](docs/screenshots/settings-dark.png)
+- [设置，窄屏](docs/screenshots/settings-mobile.png)
+- [本机元宝发送后回到登录](docs/screenshots/yuanbao-vm-guest.png)
+- [协调方人工停止元宝，不是扩展回路](docs/screenshots/yuanbao-guest-stop-manual.webp)
 
 ## 实际测试
 
@@ -189,7 +195,7 @@ git status --short
 
 分组和网页桥提交后，用下面的命令核对。若其后只有记下哈希的修订，以 `git rev-parse HEAD` 为准，并确认功能提交仍是祖先。
 
-分组与网页桥在：
+边界修正和设置页的哈希由下一笔交接提交写入。分组与网页桥仍是祖先：
 
 `989b3b8c0e00b652a270e6b5a6728372e4abc228`
 

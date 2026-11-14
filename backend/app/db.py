@@ -147,6 +147,9 @@ class Database:
         self._ensure_column("members", "web_model_label", "TEXT")
         self._ensure_column("members", "web_conversation", "TEXT")
         self._ensure_column("members", "web_auto", "INTEGER NOT NULL DEFAULT 0")
+        self._ensure_column("sessions", "parent_started_at", "TEXT")
+        self._ensure_column("sessions", "parent_deadline_at", "TEXT")
+        self._ensure_column("sessions", "run_tokens_known", "INTEGER NOT NULL DEFAULT 1")
         self._ensure_column("messages", "group_id", "TEXT")
         self._ensure_column("messages", "audience", "TEXT")
         self._ensure_column("messages", "target_member_id", "TEXT")
@@ -230,6 +233,7 @@ class Database:
         row["speaking_member_ids"] = json.loads(row.pop("speaking_json") or "[]")
         row["stop_on_no_new_point"] = bool(row["stop_on_no_new_point"])
         row["run_cost_known"] = bool(row["run_cost_known"])
+        row["run_tokens_known"] = bool(row.get("run_tokens_known", 1))
         row["layout"] = row.get("layout") or "shared"
         return row
 
@@ -369,20 +373,59 @@ class Database:
             row = self._one("SELECT COUNT(*) AS n FROM runs WHERE session_id=?", (sid,))
             return int(row["n"] if row else 0)
 
-    def begin_run(self, sid: str, run_token: str, mode: str, started_at: str, deadline_at: str) -> bool:
+    def begin_run(
+        self,
+        sid: str,
+        run_token: str,
+        mode: str,
+        started_at: str,
+        deadline_at: str,
+        *,
+        reset_budget: bool = True,
+    ) -> bool:
         with self._lock:
-            cur = self.conn.execute(
-                """
-                UPDATE sessions SET
-                  status='running', mode=?, run_token=?, current_round=0, ai_message_count=0,
-                  run_tokens=0, run_cost_usd=0, run_cost_known=1, end_reason=NULL,
-                  speaking_json='[]', started_at=?, deadline_at=?, updated_at=?
-                WHERE id=? AND status NOT IN ('running', 'paused')
-                """,
-                (mode, run_token, started_at, deadline_at, now_iso(), sid),
-            )
+            if reset_budget:
+                cur = self.conn.execute(
+                    """
+                    UPDATE sessions SET
+                      status='running', mode=?, run_token=?, current_round=0, ai_message_count=0,
+                      run_tokens=0, run_cost_usd=0, run_cost_known=1, run_tokens_known=1, end_reason=NULL,
+                      speaking_json='[]', started_at=?, deadline_at=?, updated_at=?
+                    WHERE id=? AND status NOT IN ('running', 'paused')
+                    """,
+                    (mode, run_token, started_at, deadline_at, now_iso(), sid),
+                )
+            else:
+                cur = self.conn.execute(
+                    """
+                    UPDATE sessions SET
+                      status='running', mode=?, run_token=?, current_round=0, end_reason=NULL,
+                      speaking_json='[]', updated_at=?
+                    WHERE id=? AND status NOT IN ('running', 'paused')
+                    """,
+                    (mode, run_token, now_iso(), sid),
+                )
             self.conn.commit()
             return cur.rowcount == 1
+
+    def remember_parent_budget(self, sid: str, started_at: str, deadline_at: str) -> None:
+        with self._lock:
+            self.conn.execute(
+                """
+                UPDATE sessions SET parent_started_at=?, parent_deadline_at=?, updated_at=?
+                WHERE id=? AND (parent_started_at IS NULL OR parent_started_at='')
+                """,
+                (started_at, deadline_at, now_iso(), sid),
+            )
+            self.conn.commit()
+
+    def mark_tokens_unknown(self, sid: str) -> None:
+        with self._lock:
+            self.conn.execute(
+                "UPDATE sessions SET run_tokens_known=0, updated_at=? WHERE id=?",
+                (now_iso(), sid),
+            )
+            self.conn.commit()
 
     def stop_session(self, sid: str, run_token: str | None, reason: str) -> bool:
         with self._lock:

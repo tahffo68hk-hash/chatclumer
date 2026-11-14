@@ -87,6 +87,8 @@ class GenRequest:
     suggest_next_nickname: str | None
     room_rule: str
     cost_cap_set: bool = False
+    token_cap_set: bool = False
+    web_conversation: str = ""
     end_reason: str = ""
     prompt: str = ""
     usage: Usage = field(default_factory=Usage)
@@ -330,10 +332,19 @@ class RoutedProvider:
 
             if req.web_site not in SITES:
                 return "网页站点不在允许列表里"
+            if (req.web_conversation or "") == "needs_rebind":
+                return "这个分支已和原网页会话拆开。绑定一个新的独立标签页之前不会发送。原网页不会因此忘掉已经读过的内容。"
             if not req.web_origin or not req.web_tab_key:
                 return "这个成员还没有绑定明确的标签页，不会向网页发送。"
             if not req.web_auto:
                 return "未打开受控自动发送。绑定标签页时需要明确允许。"
+            if req.token_cap_set:
+                return "网页不回报精确 token。设了 token 上限时不会把字符数当成精确预算，这次不发送。"
+            from .webbridge import SITE_STATUS
+
+            site_state = (SITE_STATUS.get(req.web_site) or {}).get("state")
+            if site_state == "UNVERIFIED":
+                return "这个站点还没有在本机核验输入框，不会发送。"
             blocked = self.web.site_blocked(req.web_site) if self.web else "网页桥还没有启动"
             if blocked:
                 return blocked

@@ -134,6 +134,41 @@ body {
   background: #efe8dc;
 }
 
+html.dark body {
+  background: #161311;
+  color: #f6f1e8;
+}
+html.dark .room-app {
+  background: #161311;
+  color: #f6f1e8;
+}
+html.dark .room-app .bg-\[\#efe8dc\],
+html.dark .room-app .bg-\[\#f7f3eb\] {
+  background-color: #1c1814;
+}
+html.dark .room-app .bg-white {
+  background-color: #2a241f;
+  color: #f6f1e8;
+}
+html.dark .room-app .text-\[\#1c1915\] {
+  color: #f6f1e8;
+}
+html.dark .room-app .text-\[\#6b6258\] {
+  color: #d7c7b4;
+}
+html.dark .room-app .border-\[\#e4d8c8\],
+html.dark .room-app .border-\[\#eadfce\] {
+  border-color: #4a4036;
+}
+html[data-text="large"] .room-app article p {
+  font-size: 1.05rem;
+  line-height: 1.7;
+}
+html[data-text="compact"] .room-app article p {
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
 .serif {
   font-family: "Noto Serif CJK SC", "Noto Serif CJK", "Songti SC", serif;
 }

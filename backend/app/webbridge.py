@@ -18,6 +18,9 @@ SITES = {
     "claude": {"origins": ["https://claude.ai"], "label": "Claude 网页"},
     "grok": {"origins": ["https://grok.com"], "label": "Grok 网页"},
     "deepseek": {"origins": ["https://chat.deepseek.com"], "label": "DeepSeek 网页"},
+    "doubao": {"origins": ["https://www.doubao.com"], "label": "豆包网页"},
+    "yuanbao": {"origins": ["https://yuanbao.tencent.com"], "label": "腾讯元宝网页"},
+    "zhipu": {"origins": ["https://chatglm.cn"], "label": "智谱清言网页"},
 }
 
 # Observed on 2026-11-15 from this environment. Not a claim that the block is permanent.
@@ -25,7 +28,7 @@ SITE_STATUS = {
     "fixture": {"state": "verified_local", "detail": "2026-11-14 扩展经本机桥完成：发送一次、读完新回复、再转发另一成员公开答复、停止后没有第三次提交。"},
     "gemini": {
         "state": "guest_extension_passed",
-        "detail": "2026-11-14 https://gemini.google.com/app 游客。页面显示 Flash-Lite。扩展发送读书建议并写回房间，再转发选中的公开答复，读到新回复后停止，没有继续提交。登录按钮可见，这两次回复没有登录。不保证游客额度一直存在。",
+        "detail": "2026-11-15 01:30 CST（2026-11-14T17:30:36Z）https://gemini.google.com/app 游客，页面显示 Flash-Lite。扩展写回两条回复。另一成员是演示模型，不是第二个网页模型。",
     },
     "qwen": {
         "state": "age_gate_stopped",
@@ -35,6 +38,18 @@ SITE_STATUS = {
     "claude": {"state": "BLOCKED", "detail": "本环境早前打开 https://claude.ai/ 得到 403。没有重试，没有绕过。"},
     "deepseek": {"state": "BLOCKED", "detail": "本环境早前打开 https://chat.deepseek.com/ 得到 CloudFront 403。没有重试，没有绕过。"},
     "grok": {"state": "login_wall", "detail": "本环境早前打开 https://grok.com/ 先是登录与 Cookie 说明，没有当成游客聊天。"},
+    "doubao": {
+        "state": "UNVERIFIED",
+        "detail": "允许逐站授权 https://www.doubao.com/chat/ 。协调方看到登录后才有回复。本机还没有核验输入框，不会发送，也不写成永远没有游客。",
+    },
+    "yuanbao": {
+        "state": "vm_login_on_send",
+        "detail": "2026-11-15 01:40 CST（2026-11-14T17:40:41Z）本机打开 https://yuanbao.tencent.com/chat/ ，关掉登录层后看见 Send Message 和 aria-label 为 Send 的控件。点 Send 后回到微信登录，没有读到回复。协调方另一台浏览器的游客双轮和停止截图不是这里的扩展回路。",
+    },
+    "zhipu": {
+        "state": "login_wall",
+        "detail": "2026-11-15 01:40 CST 本机打开 https://chatglm.cn/ 停在手机号登录，没有填写、没有发送。协调方另一台浏览器的游客双轮不是这里的扩展回路。页面标签 GLM-5.3-Flash极致 不是精确底层 ID。",
+    },
 }
 
 
@@ -116,7 +131,7 @@ class WebBridge:
         if row:
             return row["reason"]
         status = SITE_STATUS.get(site) or {}
-        if status.get("state") == "BLOCKED":
+        if status.get("state") in {"BLOCKED", "UNVERIFIED", "login_wall", "vm_login_on_send"}:
             return status["detail"]
         return None
 

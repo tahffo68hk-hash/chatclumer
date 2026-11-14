@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { RichText } from "@/components/rich-text";
 import { api, eventUrl } from "@/lib/api";
 import type { CatalogItem, ChatMessage, Member, RoomGroup, Session } from "@/lib/types";
 
@@ -29,6 +30,43 @@ function clock(iso?: string | null) {
     hour12: false,
     timeZone: "Asia/Shanghai",
   }).format(new Date(iso));
+}
+
+function downloadRoom(kind: "md" | "json", sessionId: string | null, messages: ChatMessage[]) {
+  const rows = messages.map((message) => ({
+    time: message.created_at,
+    nickname: message.nickname,
+    role: message.role_name,
+    content: message.content,
+    status: message.status,
+    model: shownModel(message),
+  }));
+  const body = kind === "json"
+    ? JSON.stringify(rows, null, 2)
+    : rows.map((row) => `## ${row.nickname || "房间"} · ${row.time}\n\n${row.content}`).join("\n\n");
+  const blob = new Blob([body], { type: kind === "json" ? "application/json" : "text/markdown" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = `room-${sessionId || "chat"}.${kind === "json" ? "json" : "md"}`;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
+function shownModel(message: ChatMessage) {
+  const id = message.model_id || "";
+  if (!id || id.startsWith("web:") || id.includes("未能核验")) return "未能核验精确 model ID";
+  return id;
+}
+
+function applyTheme(mode: "light" | "dark" | "system") {
+  localStorage.setItem("room-theme", mode);
+  const dark = mode === "dark" || (mode === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  document.documentElement.classList.toggle("dark", dark);
+}
+
+function applyText(size: string) {
+  localStorage.setItem("room-text", size);
+  document.documentElement.dataset.text = size;
 }
 
 function upsert(list: ChatMessage[], message: ChatMessage) {
@@ -67,6 +105,12 @@ export function ChatApp() {
   const [picked, setPicked] = useState<string[]>([]);
   const [preview, setPreview] = useState("");
   const [audience, setAudience] = useState("all");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [theme, setTheme] = useState<"light" | "dark" | "system">("system");
+  const [textSize, setTextSize] = useState("normal");
+  const [link, setLink] = useState<"ok" | "down">("ok");
+  const [pairCode, setPairCode] = useState("");
+  const [webMemory, setWebMemory] = useState<"rebind" | "retain">("rebind");
   const [catalog, setCatalog] = useState<CatalogItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -176,6 +220,7 @@ export function ChatApp() {
       setMessages((list) => upsert(list, data));
     });
     source.onerror = () => {
+      setLink("down");
       source.close();
     };
     return () => source.close();
@@ -191,6 +236,13 @@ export function ChatApp() {
     }, 1000);
     return () => window.clearInterval(timer);
   }, [currentId, loadList, loadRoom, session]);
+
+  useEffect(() => {
+    const storedTheme = localStorage.getItem("room-theme");
+    const storedText = localStorage.getItem("room-text");
+    if (storedTheme === "light" || storedTheme === "dark" || storedTheme === "system") setTheme(storedTheme);
+    if (storedText) setTextSize(storedText);
+  }, []);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 250);
@@ -346,7 +398,7 @@ export function ChatApp() {
   const mode = session?.mode || "free_chat";
 
   return (
-    <div className="flex h-dvh flex-col bg-[#efe8dc] text-[#1c1915]">
+    <div className="room-app flex h-dvh flex-col bg-[#efe8dc] text-[#1c1915]">
       <div className="grid min-h-0 flex-1 lg:grid-cols-[280px_minmax(0,1fr)_320px]">
         <aside className={`${pane === "people" ? "flex" : "hidden"} min-h-0 flex-col bg-[#1b1916] text-[#f6f1e8] lg:flex`}>
           <div className="flex items-center justify-between px-4 py-4">
@@ -446,6 +498,7 @@ export function ChatApp() {
           <header className="border-b border-[#e4d8c8] bg-[#f7f3eb] px-4 py-3">
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="serif text-2xl">{session?.title || "选择一个房间"}</h2>
+              <Button data-testid="open-settings" size="sm" variant="outline" onClick={() => setSettingsOpen(true)}>设置</Button>
               {session && (
                 <Badge data-testid="status-pill" variant={session.status === "running" ? "default" : "secondary"}>
                   {session.status_label}
@@ -491,9 +544,15 @@ export function ChatApp() {
                       setError("先选中讨论组里要拆出去的成员");
                       return;
                     }
-                    void api.split(currentId, group.id, picked.filter((id) => group.member_ids.includes(id)), "fresh").then(() => loadRoom(currentId)).catch((err) => setError(err.message));
+                    void api.split(currentId, group.id, picked.filter((id) => group.member_ids.includes(id)), "fresh", webMemory).then(() => loadRoom(currentId)).catch((err) => setError(err.message));
                   }}>拆成新分支</Button>
                 </div>
+                <label className="text-xs text-[#6b6258]">拆出后的网页
+                  <select data-testid="web-memory" className="ml-2 rounded border bg-white px-2 py-1" value={webMemory} onChange={(event) => setWebMemory(event.target.value as "rebind" | "retain")}>
+                    <option value="rebind">绑定新的独立会话后再发送</option>
+                    <option value="retain">沿用已有记忆</option>
+                  </select>
+                </label>
                 {preview && <p data-testid="merge-preview" className="whitespace-pre-wrap text-xs text-[#6b6258]">{preview}</p>}
               </div>
             )}
@@ -526,6 +585,15 @@ export function ChatApp() {
                   创建演示群
                 </Button>
               </div>
+            )}
+            {link === "down" && (
+              <p data-testid="link-down" className="mx-auto mb-3 max-w-3xl rounded-lg bg-[#fff1df] px-3 py-2 text-sm text-[#9a3412]">
+                和本机后端的连接断了。重新读取不会再次发送上一条。
+                <Button className="ml-2" size="sm" variant="outline" data-testid="reload-room" onClick={() => currentId && loadRoom(currentId).then(() => setLink("ok")).catch((err) => setError(err.message))}>重新读取</Button>
+              </p>
+            )}
+            {error && /登录|验证/.test(error) && (
+              <p data-testid="login-wait" className="mx-auto mb-3 max-w-3xl rounded-lg bg-[#fff1df] px-3 py-2 text-sm text-[#9a3412]">网页停在登录或验证。这一站不再自动发送。</p>
             )}
             {session && messages.length === 0 && (
               <p className="mx-auto mt-10 max-w-lg text-center text-sm leading-6 text-[#6b6258]">
@@ -574,7 +642,7 @@ export function ChatApp() {
                 <Meter label="轮次" value={`${session?.current_round || 0}/${session?.max_rounds || settings.max_rounds}`} />
                 <Meter label="AI 消息" value={`${session?.ai_message_count || 0}/${session?.max_ai_messages || settings.max_ai_messages}`} />
                 <Meter label="剩余秒" value={remain == null ? "—" : String(remain)} />
-                <Meter label="token" value={String(session?.run_tokens || 0)} />
+                <Meter label="token" value={session?.run_tokens_known === false ? "未知" : String(session?.run_tokens || 0)} />
                 <Meter label="费用 USD" value={session?.run_cost_known === false ? "未知" : (session?.run_cost_usd || 0).toFixed(4)} />
                 <Meter label="上下文版本" value={String(session?.context_version || 0)} />
               </section>
@@ -712,6 +780,46 @@ export function ChatApp() {
         ))}
       </nav>
 
+      <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>设置</DialogTitle>
+            <DialogDescription>主题、字号、导出和本机网页桥。手机上点外面或关闭即可回到聊天。</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3 text-sm">
+            <label>外观
+              <select data-testid="theme-select" className="mt-1 h-9 w-full rounded-lg border bg-white px-2" value={theme} onChange={(event) => {
+                const value = event.target.value as "light" | "dark" | "system";
+                setTheme(value);
+                applyTheme(value);
+              }}>
+                <option value="light">浅色</option>
+                <option value="dark">深色</option>
+                <option value="system">跟随系统</option>
+              </select>
+            </label>
+            <label>对话字号
+              <select data-testid="text-size" className="mt-1 h-9 w-full rounded-lg border bg-white px-2" value={textSize} onChange={(event) => {
+                setTextSize(event.target.value);
+                applyText(event.target.value);
+              }}>
+                <option value="compact">紧凑</option>
+                <option value="normal">标准</option>
+                <option value="large">大</option>
+              </select>
+            </label>
+            <p className="text-xs text-[#6b6258]">Enter 发送，Shift+Enter 换行。输入法组合过程中不会发送。</p>
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" variant="outline" data-testid="export-md" onClick={() => downloadRoom("md", currentId, messages)}>导出 Markdown</Button>
+              <Button size="sm" variant="outline" data-testid="export-json" onClick={() => downloadRoom("json", currentId, messages)}>导出 JSON</Button>
+            </div>
+            <p className="text-xs text-[#6b6258]">导出只有当前房间的公开消息，不含配对令牌或密钥。</p>
+            <Button size="sm" variant="secondary" data-testid="pair-code" onClick={() => void api.pairCode().then((item) => setPairCode(item.code)).catch((err) => setError(err.message))}>生成本机配对码</Button>
+            {pairCode && <p data-testid="pair-code-value">配对码 {pairCode}。粘贴到扩展弹窗。令牌不会出现在这里或聊天记录里。五分钟内有效，用一次即失效。</p>}
+            <p className="text-xs text-[#6b6258]">手机可以打开群聊页面。网页发送要在开着扩展的这台电脑上完成。元宝和智谱在这台环境没有完成游客发送，不会自动发到登录页。</p>
+          </div>
+        </DialogContent>
+      </Dialog>
       <Dialog open={memberOpen} onOpenChange={setMemberOpen}>
         <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
           <DialogHeader>
@@ -895,6 +1003,7 @@ function Composer({
           className="min-h-16 bg-white"
           onInput={(event) => setHasText(event.currentTarget.value.trim().length > 0)}
           onKeyDown={(event) => {
+            if (event.nativeEvent.isComposing || event.keyCode === 229) return;
             if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault();
               void send();
@@ -961,7 +1070,7 @@ function MessageRow({ message, reply, onReply }: { message: ChatMessage; reply?:
             {discarded && <Badge variant="secondary">{message.status === "cancelled" ? "已取消" : "已丢弃"}</Badge>}
           </div>
           <p className="mt-0.5 font-mono text-[11px] text-[#6b6258]">
-            {message.provider || "room"} / {message.model_id || "-"}
+            {message.provider || "room"} / {shownModel(message)}
             {message.round_number ? ` · 第 ${message.round_number} 轮` : ""}
             {phaseLabel(message.phase) ? ` · ${phaseLabel(message.phase)}` : ""}
             {` · ${clock(message.created_at)}`}
@@ -971,9 +1080,17 @@ function MessageRow({ message, reply, onReply }: { message: ChatMessage; reply?:
               回复 {reply.nickname}：{reply.content.slice(0, 48)}
             </p>
           )}
-          <p className={`mt-2 whitespace-pre-wrap text-sm leading-6 ${message.status === "error" ? "text-[#b42318]" : ""} ${discarded ? "line-through" : ""}`}>
-            {message.content || (message.status === "streaming" ? "…" : "")}
-          </p>
+          <div className={`mt-2 text-sm leading-6 ${message.status === "error" ? "text-[#b42318]" : ""} ${discarded ? "line-through" : ""}`}>
+            {message.content ? <RichText text={message.content} /> : (message.status === "streaming" ? "…" : "")}
+          </div>
+          {message.content && message.author_type !== "system" && (
+            <button
+              className="mt-2 text-xs text-[#9a3412]"
+              onClick={() => void navigator.clipboard.writeText(message.content)}
+            >
+              复制
+            </button>
+          )}
           {message.discarded_reason && <p className="mt-1 text-[11px] text-[#6b6258]">标记：{message.discarded_reason}</p>}
           {message.suggest_next_nickname && <p className="mt-1 text-[11px] text-[#6b6258]">建议下一位：{message.suggest_next_nickname}（仅供调度参考）</p>}
           {message.author_type !== "system" && message.status === "complete" && (

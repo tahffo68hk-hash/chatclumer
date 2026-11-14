@@ -224,3 +224,99 @@ def test_extension_auth_origin_replay_and_stop(tmp_path):
     assert late["accepted"] is False
     assert again.get("duplicate") or again["accepted"] is False
     assert "跨站" not in str(client.get(f"/api/sessions/{created['id']}/messages").json())
+    evil = client.post("/api/ext/pair", json={"code": "nope"}, headers={"Origin": "https://gemini.google.com"})
+    assert evil.status_code == 403
+    assert client.post("/api/ext/code", headers={"Origin": "https://evil.example"}).status_code == 403
+    fresh = client.post("/api/ext/code", headers={"Origin": "http://127.0.0.1:43123"})
+    assert fresh.status_code == 200
+    same_tab = client.post(
+        f"/api/members/{member['id']}/web-bind",
+        json={
+            "web_site": "fixture",
+            "web_origin": "http://127.0.0.1:43124",
+            "web_tab_key": "tab-fixture-1",
+            "web_auto": True,
+        },
+    )
+    other = client.post(
+        f"/api/sessions/{created['id']}/members",
+        json={"nickname": "网页乙", "role_name": "读者", "provider": "web", "model_id": "web:fixture"},
+    ).json()
+    clash = client.post(
+        f"/api/members/{other['id']}/web-bind",
+        json={
+            "web_site": "fixture",
+            "web_origin": "http://127.0.0.1:43124",
+            "web_tab_key": "tab-fixture-1",
+            "web_auto": True,
+        },
+    )
+    assert same_tab.status_code == 200
+    assert clash.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_branch_parent_budget_survives_the_next_run(tmp_path):
+    provider = EchoProvider(delay=0.01)
+    db, engine, room = make(tmp_path, provider, layout="branches", max_rounds=3, max_ai_messages=1, max_seconds=30)
+    add_member(db, room["id"], "甲")
+    await engine.ingest_message(room["id"], "第一问")
+    first = await finish(engine, room["id"])
+    assert provider.calls == 1
+    assert first["ai_message_count"] == 1
+    await engine.ingest_message(room["id"], "再问一句")
+    second = await finish(engine, room["id"])
+    assert provider.calls == 1
+    assert second["end_reason"] == "limit_messages"
+    assert second["ai_message_count"] == 1
+
+
+def test_web_token_cap_refuses_and_split_drops_the_tab(tmp_path):
+    app = create_app(str(tmp_path / "room.db"), str(tmp_path / "secrets.json"))
+    client = TestClient(app)
+    created = client.post(
+        "/api/sessions",
+        json={"title": "预算", "layout": "branches", "max_rounds": 1, "max_ai_messages": 4, "max_seconds": 30, "max_tokens": 20},
+    ).json()
+    member = client.post(
+        f"/api/sessions/{created['id']}/members",
+        json={"nickname": "网页甲", "role_name": "读者", "provider": "web", "model_id": "web:fixture"},
+    ).json()
+    other = client.post(
+        f"/api/sessions/{created['id']}/members",
+        json={"nickname": "网页乙", "role_name": "读者", "provider": "demo", "model_id": "demo-synthesizer-v1"},
+    ).json()
+    bound = client.post(
+        f"/api/members/{member['id']}/web-bind",
+        json={
+            "web_site": "fixture",
+            "web_origin": "http://127.0.0.1:43124",
+            "web_tab_key": "tab-a",
+            "web_auto": True,
+        },
+    )
+    assert bound.status_code == 200
+    sent = client.post(f"/api/sessions/{created['id']}/messages", json={"content": "读书", "audience": "all"})
+    assert sent.status_code == 200
+    import time
+    time.sleep(0.4)
+    body = str(client.get(f"/api/sessions/{created['id']}/messages").json())
+    assert "精确 token" in body
+    count = app.state.engine.web.db.conn.execute("SELECT COUNT(*) AS n FROM ext_jobs").fetchone()[0]
+    assert count == 0
+    client.post(f"/api/sessions/{created['id']}/stop")
+    merged = client.post(
+        f"/api/sessions/{created['id']}/groups/merge",
+        json={"member_ids": [member["id"], other["id"]]},
+    )
+    assert merged.status_code == 200
+    group_id = merged.json()["group"]["id"]
+    split = client.post(
+        f"/api/sessions/{created['id']}/groups/{group_id}/split",
+        json={"member_ids": [member["id"]], "carry": "fresh", "web_memory": "rebind"},
+    )
+    assert split.status_code == 200
+    again = client.get(f"/api/sessions/{created['id']}").json()
+    web = next(item for item in again["members"] if item["id"] == member["id"])
+    assert web["web_tab_key"] in {"", None}
+    assert web["web_conversation"] == "needs_rebind"
