@@ -1,0 +1,86 @@
+export type Session = {
+  id: string;
+  title: string;
+  status: string;
+  status_label: string;
+  mode: string;
+  max_rounds: number;
+  max_ai_messages: number;
+  max_seconds: number;
+  max_tokens: number | null;
+  max_cost_usd: number | null;
+  summary_mode: string;
+  summary_member_id: string | null;
+  cross_delay_ms: number;
+  room_rule: string;
+  stop_on_no_new_point: boolean;
+  current_round: number;
+  ai_message_count: number;
+  run_tokens: number;
+  run_cost_usd: number;
+  run_cost_known: boolean;
+  total_tokens: number;
+  total_cost_usd: number;
+  context_version: number;
+  run_token: string | null;
+  end_reason: string | null;
+  end_reason_label: string;
+  speaking_member_ids: string[];
+  speaking_nicknames: string[];
+  started_at: string | null;
+  deadline_at: string | null;
+  message_count?: number;
+  member_count?: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type Member = {
+  id: string;
+  session_id: string;
+  nickname: string;
+  role_name: string;
+  persona: string;
+  provider: string;
+  model_id: string;
+  api_base: string | null;
+  api_key_env: string | null;
+  enabled: boolean;
+  avatar_color: string;
+};
+
+export type ChatMessage = {
+  id: string;
+  session_id: string;
+  author_type: "user" | "ai" | "system";
+  member_id: string | null;
+  nickname: string | null;
+  role_name: string | null;
+  provider: string | null;
+  model_id: string | null;
+  avatar_color: string | null;
+  content: string;
+  status: string;
+  reply_to_id: string | null;
+  round_number: number | null;
+  phase: string | null;
+  context_version: number;
+  suggest_next_nickname: string | null;
+  is_demo: boolean;
+  is_summary: boolean;
+  discarded_reason: string | null;
+  prompt_tokens: number;
+  completion_tokens: number;
+  cost_usd: number;
+  created_at: string;
+  finished_at: string | null;
+};
+
+export type CatalogItem = {
+  provider: string;
+  label: string;
+  model_id: string;
+  paid: boolean;
+  key_env: string;
+  note: string;
+};
