@@ -201,7 +201,11 @@ git status --short
 
 分组和网页桥提交后，用下面的命令核对。若其后只有记下哈希的修订，以 `git rev-parse HEAD` 为准，并确认功能提交仍是祖先。
 
-元宝 A/B 读回在：
+元宝一段完成即读回在：
+
+`3335c75d02aa85b33eb9e32f41d6acdd76f7286e`
+
+元宝 A/B 读回仍是祖先：
 
 `a847146d5b6864bb20531cf54294b73526829f90`
 
@@ -234,7 +238,7 @@ git status --short
 ```bash
 git rev-parse HEAD
 git log -1 --oneline
-git merge-base --is-ancestor a847146d5b6864bb20531cf54294b73526829f90 HEAD && echo ancestor-ok
+git merge-base --is-ancestor 3335c75d02aa85b33eb9e32f41d6acdd76f7286e HEAD && echo ancestor-ok
 git status --short
 ```
 
