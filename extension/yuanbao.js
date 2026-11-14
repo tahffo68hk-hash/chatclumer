@@ -17,13 +17,25 @@ function yuanbaoNormalize(value) {
   return String(value || "").replace(/[\u200b\u200c\u200d\ufeff]/g, "").replace(/\s+/g, " ").trim();
 }
 
+function yuanbaoSendIn(scope) {
+  if (!scope) return null;
+  const byId = scope.querySelector("#yuanbao-send-btn");
+  if (byId && !byId.hidden && !byId.closest("[data-recommend]")) return byId;
+  const labeled = [...scope.querySelectorAll("[data-new-input-control='send'] [aria-label='Send'], [data-new-input-control='send'] [aria-label='发送']")].find((el) => {
+    return !el.hidden && !el.closest("[data-recommend]");
+  });
+  return labeled || null;
+}
+
 function yuanbaoSend(root) {
   const composer = yuanbaoComposer(root);
   if (!composer) return null;
+  const card = composer.closest("[data-new-input-card]");
+  if (card) return yuanbaoSendIn(card);
   let node = composer.parentElement;
   while (node && node !== root.parentElement) {
     if (node.querySelector("[data-recommend]")) return null;
-    const local = [...node.querySelectorAll("[aria-label='Send'], [aria-label='发送']")].find((el) => {
+    const local = yuanbaoSendIn(node) || [...node.querySelectorAll("[aria-label='Send'], [aria-label='发送']")].find((el) => {
       return !el.hidden && !el.closest("[data-recommend]");
     });
     if (local) return local;
@@ -49,10 +61,35 @@ function yuanbaoComposerText(node) {
   return yuanbaoNormalize(node.innerText || node.value || node.textContent || "");
 }
 
+function yuanbaoSendBlocked(el) {
+  if (!el || el.hidden || el.disabled || el.getAttribute("aria-disabled") === "true") return true;
+  return [...el.classList].some((name) => name.startsWith("SendButton_disabled") || name.startsWith("SendButton_sendNot"));
+}
+
 function yuanbaoSendUsable(root) {
   const send = yuanbaoSend(root);
-  if (!send || send.disabled || send.getAttribute("aria-disabled") === "true") return null;
+  if (!send || yuanbaoSendBlocked(send)) return null;
   return send;
+}
+
+function yuanbaoPress(el) {
+  const view = el.ownerDocument.defaultView || window;
+  const init = { bubbles: true, cancelable: true, view };
+  for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) {
+    const Ctor = type.startsWith("pointer") && typeof view.PointerEvent === "function" ? view.PointerEvent : view.MouseEvent;
+    el.dispatchEvent(new Ctor(type, init));
+  }
+}
+
+function yuanbaoEnter(composer) {
+  const event = new KeyboardEvent("keydown", { key: "Enter", code: "Enter", bubbles: true, cancelable: true });
+  try {
+    Object.defineProperty(event, "keyCode", { get() { return 13; } });
+    Object.defineProperty(event, "which", { get() { return 13; } });
+  } catch {
+    /* 这个浏览器不允许改 keyCode */
+  }
+  composer.dispatchEvent(event);
 }
 
 function yuanbaoSame(node, prompt) {
@@ -110,19 +147,26 @@ async function yuanbaoDispatchSend(root, prompt, timeoutMs, shouldAbort) {
   const matched = yuanbaoCommitPrompt(root, prompt);
   const before = yuanbaoHumans(root).length;
   let clicked = false;
+  let pressedAt = 0;
+  let entered = false;
   while (Date.now() < deadline) {
     if (shouldAbort && shouldAbort()) {
       if (!clicked) yuanbaoClearComposer(composer);
       return { ok: false, detail: "cancelled", clicked };
     }
+    const ready = matched && yuanbaoSame(composer, prompt) && !composer.classList.contains("ql-blank");
     if (!clicked) {
       const send = yuanbaoSendUsable(root);
-      if (matched && yuanbaoSame(composer, prompt) && send) {
-        send.click();
+      if (ready && send) {
+        yuanbaoPress(send);
         clicked = true;
+        pressedAt = Date.now();
       }
     } else if (yuanbaoHumans(root).length > before) {
       return { ok: true, clicked: true };
+    } else if (!entered && pressedAt && Date.now() - pressedAt >= 500) {
+      yuanbaoEnter(composer);
+      entered = true;
     }
     await new Promise((resolve) => setTimeout(resolve, 50));
   }

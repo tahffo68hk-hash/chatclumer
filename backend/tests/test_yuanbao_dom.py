@@ -40,8 +40,24 @@ PAGE = """
     </div>
   </div>
 </div>
-<div class="ql-editor" contenteditable="true" data-placeholder="Send Message"></div>
-<div aria-label="Send"></div>
+<div data-new-input-card>
+  <div data-input-main-content="true">
+    <div data-input-editor-area="true">
+      <div id="search-bar">
+        <div class="ql-container InputTextArea_hightLightTextAreaNew__fixture">
+          <div class="ql-editor ql-blank" contenteditable="true" data-placeholder="Send Message" enterkeyhint="send"><p><br></p></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div data-input-bottom-toolbar="true" data-prevent-quill-blur="true">
+    <div data-input-toolbar-right="true">
+      <div data-new-input-control="send">
+        <div id="yuanbao-send-btn" aria-label="Send" class="SendButton_sendButton__g3Lcb"><svg></svg></div>
+      </div>
+    </div>
+  </div>
+</div>
 <div aria-label="Stop Answering" hidden></div>
 """
 
@@ -147,10 +163,29 @@ def test_editor_state_not_dom_text_enables_send_and_cards_are_not_clicked():
         page = browser.new_page()
         page.set_content(
             """
-            <div id="composer-box">
-              <div class="ql-editor" contenteditable="true" data-placeholder="发消息"></div>
-              <button type="button" id="real-send" aria-label="Send" disabled>发送</button>
+            <div data-new-input-card>
+              <div data-input-main-content="true">
+                <div>
+                  <div data-input-editor-area="true">
+                    <div id="search-bar">
+                      <div class="ql-container InputTextArea_hightLightTextAreaNew__hash">
+                        <div class="ql-editor ql-blank" contenteditable="true" data-placeholder="Send Message" enterkeyhint="send"><p><br></p></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div data-input-bottom-toolbar="true" data-prevent-quill-blur="true">
+                <div data-input-toolbar-right="true">
+                  <button type="button" aria-label="Add" data-new-input-control="add-tools-trigger">Add</button>
+                  <button type="button" aria-label="Switch model">Switch model</button>
+                  <div data-new-input-control="send">
+                    <div id="yuanbao-send-btn" aria-label="Send" class="SendButton_sendButton__g3Lcb SendButton_disabled__v1PnQ SendButton_sendNot__sUMPk"><svg></svg></div>
+                  </div>
+                </div>
+              </div>
             </div>
+            <div id="decoy-send" aria-label="Send">页外发送</div>
             <button type="button" data-recommend aria-label="发送">高层腰线层住宅优缺点有哪些？</button>
             <button type="button" data-recommend>做暖冬菌菇汤</button>
             """
@@ -158,29 +193,43 @@ def test_editor_state_not_dom_text_enables_send_and_cards_are_not_clicked():
         page.evaluate(
             """() => {
               const editor = document.querySelector(".ql-editor");
-              const send = document.querySelector("#real-send");
               let model = "";
               window.__cards = 0;
               window.__sends = 0;
-              document.querySelectorAll("[data-recommend]").forEach((button) => {
+              window.__seq = [];
+              const paint = () => {
+                const send = document.querySelector("#yuanbao-send-btn");
+                editor.classList.toggle("ql-blank", !model.trim());
+                editor.innerHTML = model.trim() ? `<p>${model}</p>` : "<p><br></p>";
+                send.className = model.trim()
+                  ? "SendButton_sendButton__g3Lcb"
+                  : "SendButton_sendButton__g3Lcb SendButton_disabled__v1PnQ SendButton_sendNot__sUMPk";
+              };
+              const arm = (send) => {
+                window.__seq = [];
+                for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) {
+                  send.addEventListener(type, () => {
+                    window.__seq.push(type);
+                    if (window.__seq.join(",") !== "pointerdown,mousedown,pointerup,mouseup,click") return;
+                    window.__seq = [];
+                    if (!model.trim() || [...send.classList].some((name) => name.startsWith("SendButton_disabled"))) return;
+                    window.__sends += 1;
+                    const row = document.createElement("div");
+                    row.className = "agent-chat__list__item--human";
+                    row.textContent = model;
+                    document.body.appendChild(row);
+                  });
+                }
+              };
+              arm(document.querySelector("#yuanbao-send-btn"));
+              document.querySelectorAll("[data-recommend], [aria-label='Add'], [aria-label='Switch model'], #decoy-send").forEach((button) => {
                 button.addEventListener("click", () => { window.__cards += 1; });
-              });
-              send.addEventListener("click", () => {
-                window.__sends += 1;
-                if (!model.trim()) return;
-                const row = document.createElement("div");
-                row.className = "agent-chat__list__item--human";
-                row.textContent = model;
-                document.body.appendChild(row);
+                button.addEventListener("pointerdown", () => { window.__cards += 1; });
               });
               editor.addEventListener("beforeinput", (event) => {
                 if (event.inputType === "deleteContentBackward") model = "";
                 if (event.inputType === "insertText") model = event.data || "";
-                editor.textContent = model;
-              });
-              editor.addEventListener("input", () => {
-                const current = document.querySelector("#real-send");
-                if (current) current.disabled = model.trim().length === 0;
+                paint();
               });
               document.execCommand = (command, _ui, value) => {
                 if (command === "insertText") editor.textContent = String(value || "");
@@ -188,19 +237,43 @@ def test_editor_state_not_dom_text_enables_send_and_cards_are_not_clicked():
               };
               editor.textContent = "请用一句话给一个读书建议。";
               window.__model = () => model;
+              window.__arm = arm;
             }"""
         )
-        untouched = page.evaluate("() => document.querySelector('#real-send').disabled")
+        untouched = page.evaluate(
+            """() => {
+              const send = document.querySelector("#yuanbao-send-btn");
+              return send.className.includes("SendButton_disabled") && document.querySelector(".ql-editor").classList.contains("ql-blank");
+            }"""
+        )
         page.add_script_tag(path=str(ROOT / "extension" / "yuanbao.js"))
         sent = page.evaluate(
             """() => yuanbaoDispatchSend(document, "请用一句话给一个读书建议。", 800)"""
         )
-        counts = page.evaluate("() => ({ cards: window.__cards, sends: window.__sends, model: window.__model() })")
+        counts = page.evaluate(
+            """() => ({
+              cards: window.__cards,
+              sends: window.__sends,
+              model: window.__model(),
+              blank: document.querySelector(".ql-editor").classList.contains("ql-blank"),
+            })"""
+        )
+        prefixes = page.evaluate(
+            """() => {
+              const send = document.querySelector("#yuanbao-send-btn");
+              send.className = "SendButton_sendButton__zzzz SendButton_disabled__yyyy SendButton_sendNot__xxxx";
+              const blocked = yuanbaoSendUsable(document) === null;
+              send.className = "SendButton_sendButton__zzzz";
+              const open = yuanbaoSendUsable(document) === send;
+              send.className = "SendButton_sendButton__g3Lcb";
+              return blocked && open;
+            }"""
+        )
         quiet = page.evaluate(
             """() => {
-              const send = document.querySelector("#real-send");
+              const send = document.querySelector("#yuanbao-send-btn");
               const fresh = send.cloneNode(true);
-              fresh.id = "real-send";
+              fresh.id = "yuanbao-send-btn";
               send.replaceWith(fresh);
               return yuanbaoDispatchSend(document, "请用一句话给一个读书建议。\\n", 250);
             }"""
@@ -208,26 +281,43 @@ def test_editor_state_not_dom_text_enables_send_and_cards_are_not_clicked():
         cleared = page.evaluate("() => window.__model()")
         again = page.evaluate(
             """() => {
-              document.querySelector("#real-send").addEventListener("click", () => {
-                window.__sends += 1;
+              window.__arm(document.querySelector("#yuanbao-send-btn"));
+              return yuanbaoDispatchSend(document, "另一句建议。", 800);
+            }"""
+        )
+        entered = page.evaluate(
+            """() => {
+              const send = document.querySelector("#yuanbao-send-btn");
+              const fresh = send.cloneNode(true);
+              fresh.id = "yuanbao-send-btn";
+              send.replaceWith(fresh);
+              const editor = document.querySelector(".ql-editor");
+              editor.addEventListener("keydown", (event) => {
+                window.__keyCode = event.keyCode;
+                if (event.key !== "Enter" || event.keyCode !== 13) return;
                 const row = document.createElement("div");
                 row.className = "agent-chat__list__item--human";
                 document.body.appendChild(row);
               });
-              return yuanbaoDispatchSend(document, "另一句建议。", 800);
+              return yuanbaoDispatchSend(document, "用回车发送。", 1200);
             }"""
         )
         final_model = page.evaluate("() => window.__model()")
+        key_code = page.evaluate("() => window.__keyCode")
         browser.close()
     assert untouched is True
+    assert prefixes is True
     assert sent["ok"] is True
     assert counts["cards"] == 0
     assert counts["sends"] == 1
+    assert counts["blank"] is False
     assert counts["model"] == "请用一句话给一个读书建议。"
     assert quiet["detail"] == "已填入，未发送"
     assert cleared == ""
     assert again["ok"] is True
-    assert final_model == "另一句建议。"
+    assert entered["ok"] is True
+    assert key_code == 13
+    assert final_model == "用回车发送。"
     assert "残留" not in final_model
 
 
