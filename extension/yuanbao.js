@@ -122,14 +122,24 @@ function yuanbaoSame(node, prompt) {
 function yuanbaoClearComposer(composer) {
   if (!composer) return;
   composer.focus();
-  const selection = window.getSelection();
-  const range = document.createRange();
-  range.selectNodeContents(composer);
-  selection.removeAllRanges();
-  selection.addRange(range);
-  document.execCommand("delete", false, null);
+  try {
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(composer);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    document.execCommand("selectAll", false, null);
+    document.execCommand("delete", false, null);
+  } catch {
+    /* 选择或删除失败时仍清掉可见文字 */
+  }
   composer.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, cancelable: true, inputType: "deleteContentBackward" }));
   composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContentBackward" }));
+  if (yuanbaoComposerText(composer)) {
+    composer.innerHTML = "<p><br></p>";
+    composer.classList.add("ql-blank");
+    composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContentBackward" }));
+  }
 }
 
 function yuanbaoPlaceCaret(composer) {
@@ -293,12 +303,73 @@ function yuanbaoText(node) {
 function yuanbaoDone(node) {
   if (!node) return false;
   if (yuanbaoMultiple(node)) {
-    const blocks = yuanbaoAnswerBlocks(node);
-    return blocks.length >= 2 && blocks.every((block) => block.classList.contains("hyc-content-md-done"));
+    return yuanbaoAnswerBlocks(node).some((block) => {
+      return block.classList.contains("hyc-content-md-done") && yuanbaoPlain(block.querySelector(".hyc-common-markdown"));
+    });
   }
   const finished = node.querySelector(".hyc-content-md-done");
   const toolbar = node.querySelector(".agent-chat__conv--ai__toolbar, .agent-chat__toolbar");
-  return !!(finished && toolbar);
+  return !!(finished && toolbar && yuanbaoPlain(finished.querySelector(".hyc-common-markdown") || finished));
+}
+
+function yuanbaoSendIdle(root) {
+  const stop = yuanbaoStop(root);
+  if (stop && yuanbaoVisible(stop)) return false;
+  const send = yuanbaoSend(root);
+  if (!send) return false;
+  const label = `${send.getAttribute("aria-label") || ""} ${send.className || ""}`;
+  return !/stop|停止|loading|streaming|generating/i.test(label);
+}
+
+function yuanbaoNewReply(root, prompt) {
+  const items = [...root.querySelectorAll(".agent-chat__list__item--human, .agent-chat__list__item--ai")];
+  const expected = yuanbaoNormalize(prompt).slice(0, 40);
+  let anchorIndex = -1;
+  items.forEach((node, index) => {
+    if (!node.classList.contains("agent-chat__list__item--human")) return;
+    const text = yuanbaoNormalize(node.innerText || node.textContent || "");
+    if (expected && text.includes(expected)) anchorIndex = index;
+  });
+  if (anchorIndex < 0) {
+    for (let index = items.length - 1; index >= 0; index -= 1) {
+      if (items[index].classList.contains("agent-chat__list__item--human")) {
+        anchorIndex = index;
+        break;
+      }
+    }
+  }
+  const after = items.slice(anchorIndex + 1).filter((node) => node.classList.contains("agent-chat__list__item--ai"));
+  return after[after.length - 1] || null;
+}
+
+function yuanbaoPartial(node) {
+  if (!node) return "";
+  const marked = [...node.querySelectorAll(".hyc-content-md-done .hyc-common-markdown")].map(yuanbaoPlain).filter(Boolean);
+  const any = marked.length ? marked : [...node.querySelectorAll(".hyc-common-markdown")].map(yuanbaoPlain).filter(Boolean);
+  if (!any.length) return "";
+  const note = yuanbaoMultiple(node)
+    ? "（元宝给出了 A/B 两个答案，已取答案 1）（可能未完整）"
+    : "（可能未完整）";
+  const second = yuanbaoMultiple(node) && any[1] ? `\n\n答案 2：${any[1]}` : "";
+  return `${any[0]}\n\n${note}${second}`;
+}
+
+function yuanbaoTimeoutNote(root, beforeCount) {
+  const clip = (value) => String(value || "").replace(/\s+/g, " ").trim().slice(0, 80);
+  const items = yuanbaoAssistants(root);
+  const last = items[items.length - 1];
+  const bubble = last ? last.querySelector("[class*='conv--ai']") : null;
+  const send = yuanbaoSend(root);
+  const md = last ? last.querySelectorAll(".hyc-content-md").length : 0;
+  const done = last ? last.querySelectorAll(".hyc-content-md-done").length : 0;
+  return [
+    "超时。",
+    `AI ${beforeCount}→${items.length}。`,
+    `末项 ${clip(last && last.className) || "无"}。`,
+    `气泡 ${clip(bubble && bubble.className) || "无"}。`,
+    `md ${md}，done ${done}。`,
+    `发送 ${clip(send && send.className) || "无"}。`,
+  ].join("");
 }
 
 function yuanbaoLoginDetail() {

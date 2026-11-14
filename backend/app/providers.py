@@ -449,7 +449,7 @@ class RoutedProvider:
             if cancel.is_set() or stale.is_set():
                 return
             request_id = new_id()
-            self.web.create_job(
+            created = self.web.create_job(
                 {
                     "request_id": request_id,
                     "session_id": req.session_id,
@@ -464,6 +464,8 @@ class RoutedProvider:
                     "prompt": req.prompt,
                 }
             )
+            if not created:
+                raise ProviderError("房间已停止，或这个标签页还有未完成任务，没有再填入")
             job = await self.web.wait_job(request_id, cancel, stale)
             if cancel.is_set() or stale.is_set():
                 return

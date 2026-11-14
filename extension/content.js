@@ -59,6 +59,12 @@ const adapters = {
     model: () => "",
     openNew: () => null,
     onlyNew: true,
+    readCap: 90000,
+    stableMs: 2500,
+    replyNode: (prompt) => (typeof yuanbaoNewReply === "function" ? yuanbaoNewReply(document, prompt) : null),
+    idle: () => typeof yuanbaoSendIdle !== "function" || yuanbaoSendIdle(document),
+    partial: (node) => (typeof yuanbaoPartial === "function" ? yuanbaoPartial(node) : ""),
+    timeoutDetail: (beforeCount) => (typeof yuanbaoTimeoutNote === "function" ? yuanbaoTimeoutNote(document, beforeCount) : "超时"),
     login: () => typeof yuanbaoLogin === "function" && yuanbaoLogin(document),
     loginDetail: () => (typeof yuanbaoLoginDetail === "function" ? yuanbaoLoginDetail() : "页面停在登录或验证，没有点击发送"),
   },
@@ -86,10 +92,20 @@ function snapshot(adapter) {
   return adapter.assistants().map((node, index) => `${index}:${adapter.text(node)}`);
 }
 
-async function waitNew(adapter, before, signal) {
+function currentReply(adapter, before, prompt) {
+  if (typeof adapter.replyNode === "function") return adapter.replyNode(prompt);
+  const nodes = adapter.assistants();
+  const fresh = adapter.onlyNew
+    ? nodes.slice(before.length)
+    : nodes.filter((_, index) => snapshot(adapter)[index] !== before[index] || index >= before.length);
+  return fresh[fresh.length - 1] || null;
+}
+
+async function waitNew(adapter, before, signal, prompt) {
   let last = "";
-  let stable = 0;
-  const deadline = Date.now() + (adapter.onlyNew ? 80000 : 32000);
+  let stableSince = 0;
+  const deadline = Date.now() + (adapter.readCap || (adapter.onlyNew ? 90000 : 32000));
+  const stableMs = adapter.stableMs || 800;
   while (Date.now() < deadline) {
     if (signal.cancelled) return cancelResult();
     if (adapter.login && adapter.login()) {
@@ -99,17 +115,23 @@ async function waitNew(adapter, before, signal) {
         : "等待回复时页面停在登录，已停止，没有读取旧消息";
       return { status: "login", detail };
     }
-    const nodes = adapter.assistants();
-    const fresh = adapter.onlyNew
-      ? nodes.slice(before.length)
-      : nodes.filter((_, index) => snapshot(adapter)[index] !== before[index] || index >= before.length);
-    const node = fresh[fresh.length - 1];
-    if (node && adapter.done(node)) {
+    const node = currentReply(adapter, before, prompt);
+    const idle = typeof adapter.idle !== "function" || adapter.idle();
+    if (node && adapter.done(node) && idle) {
       const text = adapter.text(node);
-      if (text && text === last) stable += 1;
-      else stable = 0;
-      last = text;
-      if (stable >= 2 && text) return { status: "complete", text };
+      if (text && text === last) {
+        if (!stableSince) stableSince = Date.now();
+        if (Date.now() - stableSince >= stableMs) return { status: "complete", text };
+      } else {
+        last = text;
+        stableSince = text ? Date.now() : 0;
+      }
+    } else {
+      const text = node ? adapter.text(node) : "";
+      if (text !== last) {
+        last = text;
+        stableSince = 0;
+      }
     }
     const body = document.body ? document.body.innerText : "";
     if (/rate limit|too many requests|you've reached your|配额已用完|次数已用完|usage limit/i.test(body) && !node) {
@@ -117,12 +139,13 @@ async function waitNew(adapter, before, signal) {
     }
     await new Promise((resolve) => setTimeout(resolve, 400));
   }
-  return {
-    status: "error",
-    detail: adapter.onlyNew
-      ? "超时"
-      : "没有等到新的助手回复",
-  };
+  const late = currentReply(adapter, before, prompt);
+  const partial = late && typeof adapter.partial === "function" ? adapter.partial(late) : "";
+  if (partial) return { status: "complete", text: partial };
+  const detail = typeof adapter.timeoutDetail === "function"
+    ? adapter.timeoutDetail(before.length)
+    : (adapter.onlyNew ? "超时" : "没有等到新的助手回复");
+  return { status: "error", detail };
 }
 
 function clickSiteStop() {
@@ -217,7 +240,10 @@ async function runJob(job) {
     const detail = typeof adapter.loginDetail === "function" ? adapter.loginDetail() : "页面停在登录或验证，没有点击发送";
     return { status: "login", detail, page_url: pageUrl };
   }
-  if (job.action === "cancel") return { status: "cancelled", page_url: pageUrl };
+  if (job.action === "cancel") {
+    releaseComposer();
+    return { status: "cancelled", page_url: pageUrl };
+  }
   if (busy) return { status: "error", detail: "这个标签页正在处理上一条", page_url: pageUrl };
   busy = true;
   const signal = { cancelled: false };
@@ -273,12 +299,13 @@ async function runJob(job) {
       send.click();
       posted = true;
     }
-    const result = await waitNew(adapter, before, signal);
-    if (result.status === "cancelled" || result.detail === "超时") {
+    const result = await waitNew(adapter, before, signal, job.prompt);
+    const timedOut = String(result.detail || "").startsWith("超时");
+    if (result.status === "cancelled" || timedOut) {
       if (!posted) clearIfUnsent(box, job.prompt);
       if (site === "yuanbao") releaseComposer(box);
     }
-    if (result.detail === "超时") reportPhase(job, "timeout");
+    if (timedOut) reportPhase(job, "timeout", result.detail);
     if (result.status === "cancelled" && !String(result.detail || "").includes("停止")) {
       const stopped = clickSiteStop();
       result.detail = stopped
@@ -318,6 +345,10 @@ globalThis.__roomBridgeToken = bridgeToken;
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (globalThis.__roomBridgeToken !== bridgeToken) return;
   if (!extensionAlive()) return;
+  if (message && message.type === "cancel") {
+    releaseComposer();
+    return;
+  }
   if (!message || message.type !== "run") return;
   const requestId = message.job && message.job.request_id;
   if (requestId && !claimJob(requestId)) {

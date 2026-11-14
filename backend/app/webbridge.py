@@ -23,7 +23,8 @@ SITES = {
     "zhipu": {"origins": ["https://chatglm.cn"], "label": "智谱清言网页"},
 }
 
-# Observed on 2026-11-15 from this environment. Not a claim that the block is permanent.
+# The extension reads a Yuanbao reply for 90s after send. This wait is longer so that report wins.
+WEB_JOB_WAIT_S = 120
 SITE_STATUS = {
     "fixture": {"state": "verified_local", "detail": "2026-11-14 扩展经本机桥完成：发送一次、读完新回复、再转发另一成员公开答复、停止后没有第三次提交。"},
     "gemini": {
@@ -44,7 +45,7 @@ SITE_STATUS = {
     },
     "yuanbao": {
         "state": "guest_login_required",
-        "detail": "2026-11-15 登录后的实页自动发送已核对：旧输入区，一条用户气泡。A/B 对比回复的读回已改，待实页再核对。游客输入仍要先登录一次。扩展不点偏好按钮，也不关登录弹窗。",
+        "detail": "2026-11-15 登录后的自动发送已核对。A/B 读回在 0.2.8 改为一段完成后即取答案 1，待实页再核对。同一轮失败后不再转发。游客输入仍要先登录一次。",
     },
     "zhipu": {
         "state": "guest_no_autosend",
@@ -188,8 +189,21 @@ class WebBridge:
             )
             self.db.conn.commit()
 
-    def create_job(self, fields: dict) -> dict:
+    def tab_busy(self, tab_key: str) -> bool:
+        with self.db._lock:
+            row = self.db.conn.execute(
+                "SELECT request_id FROM ext_jobs WHERE tab_key=? AND status IN ('queued', 'sending') LIMIT 1",
+                (tab_key,),
+            ).fetchone()
+        return row is not None
+
+    def create_job(self, fields: dict) -> dict | None:
         request_id = fields["request_id"]
+        session = self.db.get_session(fields["session_id"])
+        if session and session["status"] in {"stopped", "finished", "failed"}:
+            return None
+        if self.tab_busy(fields["tab_key"]):
+            return None
         with self.db._lock:
             self.db.conn.execute(
                 """
@@ -387,7 +401,7 @@ class WebBridge:
             event = asyncio.Event()
             self.waiters[request_id] = event
         self.loop = asyncio.get_running_loop()
-        deadline = asyncio.get_running_loop().time() + 90
+        deadline = asyncio.get_running_loop().time() + WEB_JOB_WAIT_S
         while True:
             if cancel.is_set() or stale.is_set():
                 self.cancel_request(request_id, "stopped" if cancel.is_set() else "stale_context")

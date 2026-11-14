@@ -630,8 +630,13 @@ def test_ab_reply_uses_answer_one_and_timeout_clears_the_composer():
         page = browser.new_page()
         page.set_content(
             """
-            <div class="agent-chat__list__item agent-chat__list__item--ai">
-              <div class="agent-chat__bubble agent-chat__conv--ai--multiple">
+            <div class="agent-chat__list__item agent-chat__list__item--ai" id="old-ai">
+              <div class="hyc-content-md hyc-content-md-done"><div class="hyc-common-markdown">旧答案</div></div>
+              <div class="agent-chat__toolbar">复制</div>
+            </div>
+            <div class="agent-chat__list__item agent-chat__list__item--human">请用一句话给一个读书建议。</div>
+            <div class="agent-chat__list__item agent-chat__list__item--ai" id="ab">
+              <div class="agent-chat__bubble agent-chat__conv--ai--multiple agent-chat__conv--ai__multi_speech_show">
                 <div class="agent-chat__conv--ai__multi_speech_tip">You are providing feedback on the new version of Yuanbao. Which answer do you prefer</div>
                 <div>
                   <h4>Answer 1</h4>
@@ -649,6 +654,7 @@ def test_ab_reply_uses_answer_one_and_timeout_clears_the_composer():
                 </div>
               </div>
             </div>
+            <div aria-label="Stop Answering" hidden>停止</div>
             <div data-new-input-card>
               <div class="ql-editor" contenteditable="true" data-placeholder="Send Message">第二轮转发</div>
               <div id="yuanbao-send-btn" aria-label="Send" class="SendButton_sendButton__g3Lcb">Send</div>
@@ -664,19 +670,41 @@ def test_ab_reply_uses_answer_one_and_timeout_clears_the_composer():
               });
             }"""
         )
+        waiting = page.evaluate(
+            """() => {
+              const node = yuanbaoNewReply(document, "请用一句话给一个读书建议。");
+              return { id: node && node.id, done: yuanbaoDone(node) };
+            }"""
+        )
         partial = page.evaluate(
             """() => {
               document.querySelector("#answer-1").classList.add("hyc-content-md-done");
-              const node = document.querySelector(".agent-chat__list__item--ai");
-              return { done: yuanbaoDone(node), prefers: window.__prefers };
+              const node = yuanbaoNewReply(document, "请用一句话给一个读书建议。");
+              const stop = document.querySelector("[aria-label='Stop Answering']");
+              stop.hidden = false;
+              const streaming = yuanbaoSendIdle(document);
+              stop.hidden = true;
+              const idle = yuanbaoSendIdle(document);
+              return {
+                id: node.id,
+                done: yuanbaoDone(node),
+                streaming,
+                idle,
+                text: yuanbaoText(node),
+                prefers: window.__prefers,
+                secondStillOpen: !document.querySelector("#answer-2").classList.contains("hyc-content-md-done"),
+              };
             }"""
         )
-        read = page.evaluate(
+        replaced = page.evaluate(
             """() => {
-              document.querySelector("#answer-2").classList.add("hyc-content-md-done");
-              const node = document.querySelector(".agent-chat__list__item--ai");
-              const text = yuanbaoText(node);
-              return { done: yuanbaoDone(node), text, prefers: window.__prefers };
+              const fresh = document.createElement("div");
+              fresh.id = "ab-replaced";
+              fresh.className = "agent-chat__list__item agent-chat__list__item--ai";
+              fresh.innerHTML = document.querySelector("#ab").innerHTML;
+              document.querySelector("#ab").replaceWith(fresh);
+              const node = yuanbaoNewReply(document, "请用一句话给一个读书建议。");
+              return node && node.id;
             }"""
         )
         single = page.evaluate(
@@ -687,24 +715,41 @@ def test_ab_reply_uses_answer_one_and_timeout_clears_the_composer():
               return { done: yuanbaoDone(node), text: yuanbaoText(node) };
             }"""
         )
+        note = page.evaluate(
+            """() => yuanbaoTimeoutNote(document, 1)"""
+        )
+        incomplete = page.evaluate(
+            """() => yuanbaoPartial(yuanbaoNewReply(document, "请用一句话给一个读书建议。"))"""
+        )
         cleared = page.evaluate(
             """() => {
+              document.execCommand = () => true;
               const composer = yuanbaoComposer(document);
+              composer.textContent = "林知秋 的公开答复：【演示回复】建议下一位由 元宝网页 补充";
               yuanbaoClearComposer(composer);
-              return (composer.innerText || composer.textContent || "").trim();
+              return (composer.innerText || composer.textContent || "").replace(/\\s+/g, "").trim();
             }"""
         )
         browser.close()
-    assert partial["done"] is False
+    assert waiting["id"] == "ab"
+    assert waiting["done"] is False
+    assert partial["id"] == "ab"
+    assert partial["done"] is True
+    assert partial["secondStillOpen"] is True
+    assert partial["streaming"] is False
+    assert partial["idle"] is True
+    assert partial["text"].startswith("先读这一句。")
+    assert "（元宝给出了 A/B 两个答案，已取答案 1）" in partial["text"]
+    assert "另一句" not in partial["text"]
+    assert "Which answer" not in partial["text"]
+    assert "prefer" not in partial["text"].lower()
+    assert "更喜欢" not in partial["text"]
     assert partial["prefers"] == 0
-    assert read["done"] is True
-    assert read["text"].startswith("先读这一句。")
-    assert "（元宝给出了 A/B 两个答案，已取答案 1）" in read["text"]
-    assert "答案 2：另一句留在附注里。" in read["text"]
-    assert "Which answer" not in read["text"]
-    assert "prefer" not in read["text"].lower()
-    assert "更喜欢" not in read["text"]
-    assert read["prefers"] == 0
+    assert replaced == "ab-replaced"
+    assert "先读这一句" not in note
+    assert "AI 1→" in note
+    assert "done 1" in note
+    assert "可能未完整" in incomplete
     assert single["done"] is True
     assert single["text"] == "单独一句。"
     assert cleared == ""
