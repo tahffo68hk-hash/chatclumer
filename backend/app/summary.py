@@ -89,7 +89,7 @@ def build_summary(transcript: list[dict], end_reason: str | None, note: str = ""
     if not recommend:
         recommend = ["- 先把讨论收成一个可观察的小实验，再决定要不要继续。"]
 
-    header = "【本地回顾 · 未额外请求模型】"
+    header = "【本地回顾 · 未额外请求模型】按公开句子摘录，不是模型重新综合。"
     if note:
         header = note.strip() + "\n" + header
     lines = [

@@ -119,3 +119,38 @@ async def test_paid_and_free_router_guards(tmp_path):
             pass
     assert "OPENROUTER" in str(raised.value)
     assert "伪装" in str(raised.value)
+
+    secrets.set("OPENROUTER_API_KEY", "or-test")
+    secrets.set_allow_paid(True)
+    priced = RoutedProvider(secrets, client_factory=factory)
+    paid = request_for("openrouter", "openai/gpt-4o-mini", "https://openrouter.ai/api/v1")
+    paid.cost_cap_set = True
+    with pytest.raises(ProviderError) as raised:
+        async for _chunk in priced.stream(paid, cancel, stale):
+            pass
+    assert "未知" in str(raised.value) or "单价" in str(raised.value)
+    assert priced.network_calls == 0
+
+    bodies = []
+
+    def free_handler(request: httpx.Request) -> httpx.Response:
+        bodies.append(json.loads(request.content.decode()))
+        if len(bodies) > 1:
+            raise AssertionError("free route retried")
+        body = 'data: {"choices":[{"delta":{"content":"免"}}],"usage":{"prompt_tokens":3,"completion_tokens":1}}\n\ndata: [DONE]\n\n'
+        return httpx.Response(200, text=body)
+
+    def free_factory():
+        return httpx.AsyncClient(transport=httpx.MockTransport(free_handler), trust_env=False)
+
+    free = RoutedProvider(secrets, client_factory=free_factory)
+    free_req = request_for("openrouter", "meta-llama/llama-3.2-3b-instruct:free", "https://openrouter.ai/api/v1")
+    free_req.cost_cap_set = True
+    parts = []
+    async for chunk in free.stream(free_req, cancel, stale):
+        parts.append(chunk)
+    assert parts == ["免"]
+    assert bodies[0]["model"] == "meta-llama/llama-3.2-3b-instruct:free"
+    assert bodies[0]["provider"] == {"allow_fallbacks": False}
+    assert "models" not in bodies[0]
+    assert len(bodies) == 1

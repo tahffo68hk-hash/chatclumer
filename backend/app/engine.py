@@ -24,6 +24,11 @@ def discussion_cap(session: dict) -> int:
     return cap
 
 
+def input_token_estimate(request: GenRequest) -> int:
+    """Count the prompt we are about to send. This is the input budget, not a price."""
+    return max(1, len(request.prompt or ""))
+
+
 def _jitter(member_id: str, round_no: int, version: int) -> float:
     digest = hashlib.sha256(f"{member_id}:{round_no}:{version}".encode()).hexdigest()
     return int(digest[:4], 16) % 100 / 10
@@ -334,6 +339,8 @@ class RoomEngine:
     def _over_budget(self, session: dict) -> str | None:
         if session["max_tokens"] is not None and session["run_tokens"] >= session["max_tokens"]:
             return "limit_tokens"
+        if session["max_cost_usd"] is not None and not int(session.get("run_cost_known") or 0):
+            return "limit_cost"
         if session["max_cost_usd"] is not None and float(session["run_cost_usd"]) >= float(session["max_cost_usd"]) - 1e-9:
             return "limit_cost"
         if session["ai_message_count"] >= session["max_ai_messages"]:
@@ -591,7 +598,9 @@ class RoomEngine:
                 self.db.insert_step(f"{run_token}:preflight:{member['id']}", session_id, run_token, "preflight")
                 self._error_message(session_id, member, session, run_token, version, round_no, phase, error)
                 return "skip"
-        reserved, reason = self.db.reserve_slot(session_id, cap)
+        estimate = input_token_estimate(request) if session["max_tokens"] is not None else 0
+        cost_known = bool(request.usage.cost_known)
+        reserved, reason = self.db.reserve_slot(session_id, cap, estimate, cost_known)
         if not reserved:
             return reason or "limit_messages"
         if not self.db.insert_step(step_key, session_id, run_token, "pending"):
@@ -650,7 +659,7 @@ class RoomEngine:
                 updated = self.db.append_message(message["id"], chunk)
                 self.publish(session_id, "message", updated)
             text = "".join(parts).strip()
-            self._apply_usage(session_id, request, text)
+            self._apply_usage(session_id, request, text, estimate)
             if cancel.is_set() or self.db.get_session(session_id)["status"] == "stopped":
                 self.db.update_message(
                     message["id"],
@@ -733,18 +742,19 @@ class RoomEngine:
             self.db.set_speaking(session_id, member["id"], False)
             self.publish_state(session_id)
 
-    def _apply_usage(self, session_id: str, request: GenRequest, text: str) -> None:
+    def _apply_usage(self, session_id: str, request: GenRequest, text: str, reserved_prompt: int = 0) -> None:
         if request.usage.completion_tokens == 0 and text:
             request.usage.completion_tokens = len(text)
         if request.usage.prompt_tokens == 0 and request.prompt:
             request.usage.prompt_tokens = len(request.prompt)
-        if request.usage.prompt_tokens or request.usage.completion_tokens or request.usage.cost_usd:
+        if request.usage.prompt_tokens or request.usage.completion_tokens or request.usage.cost_usd or reserved_prompt:
             self.db.add_usage(
                 session_id,
                 request.usage.prompt_tokens,
                 request.usage.completion_tokens,
                 float(request.usage.cost_usd or 0),
                 bool(request.usage.cost_known),
+                reserved_prompt=reserved_prompt,
             )
 
     def _pick_reply(self, member: dict, transcript: list[dict]) -> dict | None:

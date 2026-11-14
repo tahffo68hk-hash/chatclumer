@@ -349,27 +349,52 @@ class Database:
             row = self._one("SELECT current_round FROM sessions WHERE id=?", (sid,))
             return int(row["current_round"]) if row else 0
 
-    def reserve_slot(self, sid: str, cap: int) -> tuple[bool, str | None]:
+    def reserve_slot(
+        self,
+        sid: str,
+        cap: int,
+        prompt_tokens: int = 0,
+        cost_known: bool = True,
+    ) -> tuple[bool, str | None]:
         with self._lock:
             session = self._one("SELECT * FROM sessions WHERE id=?", (sid,))
             if not session or session["status"] != "running":
                 return False, "not_running"
             if session["ai_message_count"] >= session["max_ai_messages"] or session["ai_message_count"] >= cap:
                 return False, "limit_messages"
-            if session["max_tokens"] is not None and session["run_tokens"] >= session["max_tokens"]:
+            incoming = max(0, int(prompt_tokens))
+            if session["max_tokens"] is not None and int(session["run_tokens"]) + incoming > int(session["max_tokens"]):
                 return False, "limit_tokens"
-            if session["max_cost_usd"] is not None and float(session["run_cost_usd"]) >= float(session["max_cost_usd"]) - 1e-9:
-                return False, "limit_cost"
+            if session["max_cost_usd"] is not None:
+                if not cost_known or not int(session.get("run_cost_known") or 0):
+                    return False, "limit_cost"
+                if float(session["run_cost_usd"]) >= float(session["max_cost_usd"]) - 1e-9:
+                    return False, "limit_cost"
             self.conn.execute(
-                "UPDATE sessions SET ai_message_count=ai_message_count+1, updated_at=? WHERE id=?",
-                (now_iso(), sid),
+                """
+                UPDATE sessions SET
+                  ai_message_count=ai_message_count+1,
+                  run_tokens=run_tokens+?,
+                  total_tokens=total_tokens+?,
+                  updated_at=?
+                WHERE id=?
+                """,
+                (incoming, incoming, now_iso(), sid),
             )
             self.conn.commit()
             return True, None
 
-    def add_usage(self, sid: str, prompt_tokens: int, completion_tokens: int, cost: float, cost_known: bool) -> None:
+    def add_usage(
+        self,
+        sid: str,
+        prompt_tokens: int,
+        completion_tokens: int,
+        cost: float,
+        cost_known: bool,
+        reserved_prompt: int = 0,
+    ) -> None:
         with self._lock:
-            tokens = int(prompt_tokens) + int(completion_tokens)
+            tokens = max(0, int(prompt_tokens) - int(reserved_prompt)) + int(completion_tokens)
             known_sql = "" if cost_known else ", run_cost_known=0"
             self.conn.execute(
                 f"""

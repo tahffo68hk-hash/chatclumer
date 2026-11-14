@@ -3,7 +3,7 @@ import asyncio
 import pytest
 
 from app.db import Database
-from app.engine import RoomEngine
+from app.engine import RoomEngine, input_token_estimate
 from app.providers import DemoProvider, ProviderError, RoutedProvider
 from app.secrets import SecretStore
 from app.summary import build_summary
@@ -119,8 +119,46 @@ async def test_cost_and_token_caps_stop_before_next_request(tmp_path):
     add_member(db, room["id"], "乙", "工程师")
     await engine.ingest_message(room["id"], "token")
     session = await finish(engine, room["id"])
-    assert tokens.calls == 1
+    assert tokens.calls == 0
+    assert session["run_tokens"] == 0
     assert session["end_reason"] == "limit_tokens"
+
+
+@pytest.mark.asyncio
+async def test_token_cap_reserves_input_before_parallel_calls(tmp_path, monkeypatch):
+    monkeypatch.setattr("app.engine.input_token_estimate", lambda _req: 40)
+    provider = EchoProvider(delay=0.15)
+    db, engine, room = make(
+        tmp_path, provider, mode="free_chat", max_rounds=1, max_ai_messages=10, max_tokens=50, max_seconds=30
+    )
+    for name in ("甲", "乙", "丙"):
+        add_member(db, room["id"], name)
+    await engine.ingest_message(room["id"], "并发输入")
+    session = await finish(engine, room["id"], timeout=3)
+    assert provider.calls == 1
+    assert session["end_reason"] == "limit_tokens"
+    assert session["run_tokens"] >= 40
+    await asyncio.sleep(0.3)
+    assert provider.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_cross_talk_is_not_a_full_fixed_rotation(tmp_path):
+    provider = EchoProvider(delay=0.01)
+    db, engine, room = make(tmp_path, provider, mode="free_chat", max_rounds=3, max_ai_messages=10, max_seconds=30)
+    for name, role in (("甲", "质疑者"), ("乙", "工程师"), ("丙", "产品")):
+        add_member(db, room["id"], name, role)
+    await engine.ingest_message(room["id"], "一起看公开记录")
+    await finish(engine, room["id"])
+    cross = [m for m in complete_ai(db, room["id"]) if m["phase"] == "cross"]
+    by_round: dict[int, list] = {}
+    for message in cross:
+        by_round.setdefault(message["round_number"], []).append(message)
+    assert by_round
+    assert all(len(items) == 1 for items in by_round.values())
+    assert len({m["nickname"] for m in cross}) <= 2
+    assert any("公开记录" in prompt or "公开发言" in prompt or "我读了" in prompt for prompt in provider.prompts)
+    assert input_token_estimate(type("R", (), {"prompt": "abc"})()) == 3
 
 
 @pytest.mark.asyncio

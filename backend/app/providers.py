@@ -300,7 +300,9 @@ class RoutedProvider:
             return None
         base = self.base_url(req)
         local = is_local_base(base) or is_local_base(req.api_base)
-        free_router = provider == "openrouter" and req.model_id.endswith(":free")
+        model_id = (req.model_id or "").strip()
+        req.model_id = model_id
+        free_router = provider == "openrouter" and model_id.endswith(":free") and " " not in model_id and "," not in model_id
         if local or free_router:
             if free_router and not self._key(req):
                 return "OpenRouter 免费模型需要 OPENROUTER_API_KEY。未配置，不会伪装成该模型。"
@@ -315,10 +317,10 @@ class RoutedProvider:
             return f"{provider} 未配置密钥，已跳过。不会用合成文本伪装成 {req.model_id}。"
         if not self.secrets.allow_paid():
             return "此接口可能产生模型费用。未开启“允许可能计费的调用”，已拒绝请求。"
-        if req.cost_cap_set:
-            return "已设置费用上限，但这个模型没有已知单价，拒绝发起可能超额的请求。"
         req.usage.cost_known = False
         req.usage.cost_usd = 0
+        if req.cost_cap_set or provider == "openrouter":
+            return "没有已知单价。未知费用不会按 0 放行，也不会改用收费模型。"
         return None
 
     def base_url(self, req: GenRequest) -> str:
@@ -380,6 +382,8 @@ class RoutedProvider:
         if req.provider == "openrouter":
             headers["HTTP-Referer"] = "http://127.0.0.1"
             headers["X-Title"] = "multi-llm-chat-room"
+            if not str(req.model_id).endswith(":free"):
+                raise ProviderError("OpenRouter 只发送明确以 :free 结尾的模型，不会去掉后缀改走收费模型。")
         body = {
             "model": req.model_id,
             "stream": True,
@@ -388,6 +392,8 @@ class RoutedProvider:
                 {"role": "user", "content": req.prompt},
             ],
         }
+        if req.provider == "openrouter":
+            body["provider"] = {"allow_fallbacks": False}
         async for line in self._lines(url, headers, body, cancel, stale):
             if not line.startswith("data:"):
                 continue

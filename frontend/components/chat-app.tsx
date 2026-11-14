@@ -410,7 +410,7 @@ export function ChatApp() {
                     </div>
                   </div>
                 ))}
-                <Button variant="secondary" className="w-full" onClick={openCreateMember}>
+                <Button data-testid="add-member" variant="secondary" className="w-full" onClick={openCreateMember}>
                   <Plus /> 添加成员
                 </Button>
               </div>
@@ -522,7 +522,7 @@ export function ChatApp() {
                 <Button data-testid="pause-button" variant="outline" disabled={session?.status !== "running"} onClick={() => control("pause")}>
                   暂停
                 </Button>
-                <Button variant="outline" disabled={session?.status !== "paused"} onClick={() => control("resume")}>
+                <Button data-testid="resume-button" variant="outline" disabled={session?.status !== "paused"} onClick={() => control("resume")}>
                   继续
                 </Button>
                 <Button data-testid="stop-button" variant="destructive" disabled={!busy} onClick={() => control("stop")}>
@@ -563,7 +563,7 @@ export function ChatApp() {
                     </option>
                   ))}
                 </select>
-                <Button variant="secondary" disabled={!!busy} onClick={() => void saveSettings()}>
+                <Button data-testid="save-limits" variant="secondary" disabled={!!busy} onClick={() => void saveSettings()}>
                   保存上限
                 </Button>
               </section>
@@ -631,13 +631,14 @@ export function ChatApp() {
           </DialogHeader>
           <div className="grid gap-3">
             <Label>昵称</Label>
-            <Input value={memberForm.nickname} onChange={(event) => setMemberForm({ ...memberForm, nickname: event.target.value })} />
+            <Input data-testid="member-nickname" value={memberForm.nickname} onChange={(event) => setMemberForm({ ...memberForm, nickname: event.target.value })} />
             <Label>角色</Label>
-            <Input value={memberForm.role_name} onChange={(event) => setMemberForm({ ...memberForm, role_name: event.target.value })} />
+            <Input data-testid="member-role" value={memberForm.role_name} onChange={(event) => setMemberForm({ ...memberForm, role_name: event.target.value })} />
             <Label>人设</Label>
             <Textarea value={memberForm.persona} onChange={(event) => setMemberForm({ ...memberForm, persona: event.target.value })} />
             <Label>提供方</Label>
             <select
+              data-testid="member-provider"
               className="h-9 rounded-lg border bg-white px-2 text-sm"
               value={memberForm.provider}
               onChange={(event) => {
@@ -658,14 +659,14 @@ export function ChatApp() {
               ))}
             </select>
             <Label>精确模型 ID</Label>
-            <Input value={memberForm.model_id} onChange={(event) => setMemberForm({ ...memberForm, model_id: event.target.value })} />
+            <Input data-testid="member-model" value={memberForm.model_id} onChange={(event) => setMemberForm({ ...memberForm, model_id: event.target.value })} />
             <Label>API Base（可选）</Label>
             <Input value={memberForm.api_base} onChange={(event) => setMemberForm({ ...memberForm, api_base: event.target.value })} />
             <Label>密钥变量名（不在这里填密钥）</Label>
             <Input value={memberForm.api_key_env} onChange={(event) => setMemberForm({ ...memberForm, api_key_env: event.target.value })} />
           </div>
           <DialogFooter>
-            <Button onClick={() => void saveMember()}>保存成员</Button>
+            <Button data-testid="member-save" onClick={() => void saveMember()}>保存成员</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -842,7 +843,9 @@ function MessageRow({ message, reply, onReply }: { message: ChatMessage; reply?:
             <span className="font-medium">{message.nickname || "房间"}</span>
             {message.role_name && <span className="text-xs text-[#6b6258]">{message.role_name}</span>}
             {message.is_demo && <Badge variant="outline">演示</Badge>}
-            {message.is_summary && <Badge>最终报告</Badge>}
+            {message.is_summary && (
+              <Badge>{message.provider === "local" ? "本地回顾" : "成员总结"}</Badge>
+            )}
             {message.status === "streaming" && <Badge variant="secondary">正在说</Badge>}
             {message.status === "error" && <Badge variant="destructive">失败</Badge>}
             {discarded && <Badge variant="secondary">{message.status === "cancelled" ? "已取消" : "已丢弃"}</Badge>}
