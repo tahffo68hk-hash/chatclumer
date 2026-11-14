@@ -147,6 +147,17 @@ member persisted
 
 ## 当前提交
 
-功能与交接在同一提交。完整哈希见下一行；若之后只有一行哈希修订，以 `git rev-parse HEAD` 为准。
+功能、截图和交接正文在：
 
-`PENDING`
+`55a7bbd34eb6ca00fb8b4d8cc7c94fc7ce00b879`
+
+若其后只有一行「记下这个哈希」的修订，包对应的是 `git rev-parse HEAD`。核对：
+
+```bash
+git rev-parse HEAD
+git log -1 --oneline
+git merge-base --is-ancestor 55a7bbd34eb6ca00fb8b4d8cc7c94fc7ce00b879 HEAD && echo ancestor-ok
+git status --short
+```
+
+`ancestor-ok` 且工作区为空，就是这份包的提交。源码 zip 没有 `.git`，哈希以本节为准。
