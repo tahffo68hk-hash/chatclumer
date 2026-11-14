@@ -62,6 +62,11 @@ export type Member = {
   api_key_env: string | null;
   enabled: boolean;
   avatar_color: string;
+  web_site?: string | null;
+  web_origin?: string | null;
+  web_tab_key?: string | null;
+  web_auto?: boolean;
+  web_conversation?: string | null;
 };
 
 export type ChatMessage = {
@@ -92,6 +97,29 @@ export type ChatMessage = {
   group_id?: string | null;
   audience?: string | null;
   event_kind?: string | null;
+};
+
+export type HighlightCard = {
+  id: string;
+  session_id: string;
+  message_id: string;
+  title: string;
+  note: string;
+  nickname: string;
+  member_id: string | null;
+  excerpt: string;
+  disclaimer: string;
+};
+
+export type SplitItem = {
+  kind: string;
+  label: string;
+  message_id: string;
+  source_message_id: string;
+  nickname: string;
+  source_nickname: string;
+  excerpt: string;
+  source_excerpt: string;
 };
 
 export type CatalogItem = {

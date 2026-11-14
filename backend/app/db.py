@@ -156,6 +156,19 @@ class Database:
         self._ensure_column("messages", "event_kind", "TEXT")
         self._ensure_column("messages", "source_message_id", "TEXT")
         self._ensure_column("messages", "source_group_id", "TEXT")
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS highlights (
+              id TEXT PRIMARY KEY,
+              session_id TEXT NOT NULL,
+              message_id TEXT NOT NULL,
+              title TEXT NOT NULL,
+              note TEXT NOT NULL DEFAULT '',
+              created_at TEXT NOT NULL,
+              UNIQUE(session_id, message_id)
+            )
+            """
+        )
         self.conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS groups (
@@ -346,6 +359,7 @@ class Database:
             self.conn.execute("DELETE FROM members WHERE session_id=?", (sid,))
             self.conn.execute("DELETE FROM steps WHERE session_id=?", (sid,))
             self.conn.execute("DELETE FROM runs WHERE session_id=?", (sid,))
+            self.conn.execute("DELETE FROM highlights WHERE session_id=?", (sid,))
             self.conn.execute("DELETE FROM sessions WHERE id=?", (sid,))
             self.conn.commit()
 
@@ -775,6 +789,48 @@ class Database:
             self.conn.execute("UPDATE messages SET content=content || ? WHERE id=?", (chunk, mid))
             self.conn.commit()
             return self.get_message(mid)
+
+    def list_highlights(self, sid: str) -> list[dict]:
+        with self._lock:
+            rows = self._all(
+                "SELECT * FROM highlights WHERE session_id=? ORDER BY created_at, rowid",
+                (sid,),
+            )
+            return [dict(row) for row in rows]
+
+    def save_highlight(self, sid: str, message_id: str, title: str, note: str) -> dict:
+        with self._lock:
+            existing = self._one(
+                "SELECT id FROM highlights WHERE session_id=? AND message_id=?",
+                (sid, message_id),
+            )
+            if existing:
+                self.conn.execute(
+                    "UPDATE highlights SET title=?, note=? WHERE id=?",
+                    (title, note, existing["id"]),
+                )
+                hid = existing["id"]
+            else:
+                hid = new_id()
+                self.conn.execute(
+                    """
+                    INSERT INTO highlights (id, session_id, message_id, title, note, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (hid, sid, message_id, title, note, now_iso()),
+                )
+            self.conn.commit()
+            row = self._one("SELECT * FROM highlights WHERE id=?", (hid,))
+            return dict(row)
+
+    def delete_highlight(self, sid: str, hid: str) -> bool:
+        with self._lock:
+            cur = self.conn.execute(
+                "DELETE FROM highlights WHERE session_id=? AND id=?",
+                (sid, hid),
+            )
+            self.conn.commit()
+            return cur.rowcount > 0
 
     def list_messages(self, sid: str) -> list[dict]:
         with self._lock:

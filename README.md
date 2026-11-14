@@ -34,10 +34,28 @@ LAN=1 bash scripts/start.sh
 
 ## 测试
 
+普通后端套件不安装浏览器库也能收集。`skipped` 是可选浏览器测试，不能把它算进 passed。
+
 ```bash
 cd backend && .venv/bin/pytest -q
-cd frontend && npx tsc --noEmit && npm run build
-backend/.venv/bin/python scripts/browser_check.py
 ```
+
+摘要要分开读，例如 `28 passed, 1 skipped` 表示 28 个后端通过、1 个浏览器测试被跳过。
+
+浏览器测试需要另装开发依赖，并且本机有 Chrome 或 Playwright 的 Chromium：
+
+```bash
+cd backend && .venv/bin/pip install -r requirements-dev.txt && .venv/bin/python -m playwright install chromium
+cd backend && .venv/bin/pytest -q -m browser
+```
+
+这台支持 Playwright 的环境里，夹具停止按钮那条浏览器测试实际跑过并通过。没有这个库的新环境会跳过它，而不是在收集阶段失败。
+
+```bash
+cd frontend && npx tsc --noEmit && npm run build
+backend/.venv/bin/python scripts/check_web_bind_ui.py
+```
+
+`check_web_bind_ui.py` 只检查成员对话框是否把来源、地址、绑定键和自动发送写进 web-bind。它不打开 Gemini 或元宝。
 
 聊天记录在 `backend/data/chat.db`（SQLite，已忽略）。来源和许可证见 `docs/SOURCES.md`。QQ / 微信见 `docs/QQ_WECHAT.md`，当前都是 `BLOCKED_EXTERNAL`。

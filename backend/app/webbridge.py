@@ -44,11 +44,11 @@ SITE_STATUS = {
     },
     "yuanbao": {
         "state": "vm_login_on_send",
-        "detail": "2026-11-15 01:40 CST（2026-11-14T17:40:41Z）本机打开 https://yuanbao.tencent.com/chat/ ，关掉登录层后看见 Send Message 和 aria-label 为 Send 的控件。点 Send 后回到微信登录，没有读到回复。协调方另一台浏览器的游客双轮和停止截图不是这里的扩展回路。",
+        "detail": "2026-11-15 01:40 CST（2026-11-14T17:40:41Z）本机看见输入框 data-placeholder=Send Message，以及 aria-label=Send。点 Send 后回到微信登录，没有读到助手正文节点。协调方机器上的游客可聊和 Stop Answering 不是这里的扩展回路。房间仍拒绝自动发送：公开回复的选择器未核实，不会用整页文字代替。",
     },
     "zhipu": {
         "state": "login_wall",
-        "detail": "2026-11-15 01:40 CST 本机打开 https://chatglm.cn/ 停在手机号登录，没有填写、没有发送。协调方另一台浏览器的游客双轮不是这里的扩展回路。页面标签 GLM-5.3-Flash极致 不是精确底层 ID。",
+        "detail": "2026-11-15 01:40 CST 本机打开 https://chatglm.cn/ 停在手机号登录。公开回复正文位置未验证，扩展不会发送，也不用整页文字代替。页面标签 GLM-5.3-Flash极致 不是精确底层 ID。",
     },
 }
 
@@ -312,7 +312,10 @@ class WebBridge:
         stored = "complete" if status == "complete" else "error"
         if job["status"] == "cancel" or status == "cancelled":
             stored = "discarded"
-        self._store(request_id, stored, text if stored == "complete" else "", body.get("model_label"), body.get("detail") or status)
+        detail = body.get("detail") or status
+        self._store(request_id, stored, text if stored == "complete" else "", body.get("model_label"), detail)
+        if any(phrase in detail for phrase in ("没有响应", "绑定不匹配", "内容脚本没有")):
+            self.db.update_member(job["member_id"], {"web_conversation": "down"})
         self._wake(request_id)
         return {"ok": True, "duplicate": False, "accepted": stored == "complete"}
 

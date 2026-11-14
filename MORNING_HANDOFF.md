@@ -87,6 +87,8 @@ bash scripts/start.sh
 | Gemini 游客网页 | 2026-11-15 01:30 CST 扩展回路通过，页面显示 Flash-Lite。另一成员是演示模型 |
 | 元宝 / 智谱 | 协调方另一台浏览器有人工双轮。本机元宝一点发送就回到登录，智谱停在手机号登录。都不是扩展回路 |
 | 设置 | 房间标题旁的「设置」：浅色/深色/跟随系统、字号、导出、本机配对码 |
+| 收藏和分歧 | 收藏卡片写明不是已核实事实。分歧只列显式质疑或反驳，没有就空着，不编共识 |
+| 网页成员表单 | 来源、页面地址、绑定键、受控自动发送会写入 web-bind。卡片上可复制成员 ID 和绑定键 |
 | Qwen 网页 | 停在年龄确认，没有读到回复 |
 | ChatGPT / Claude / DeepSeek 网页 | BLOCKED，没有绕过 |
 | Grok 网页 | 登录墙，没有当成游客 |
@@ -103,7 +105,7 @@ bash scripts/start.sh
 
 记录里的 UTC 已换成北京时间。2026-11-14T17:30:36Z 是 2026-11-15 01:30:36 CST。清单如下。
 
-- 旧的 21 个测试仍在。加上分组、预算不重置、token 上限拒绝网页、拆分解除标签、来源拒绝和夹具停止按钮后，`cd backend && .venv/bin/pytest -q` 是 29 passed。
+- 旧的 21 个测试仍在。本机装了 Playwright 时，`cd backend && .venv/bin/pytest -q` 是 32 passed，其中 1 条是夹具停止按钮的浏览器测试，这台环境实际跑过。没有 Playwright 的新环境会显示 31 passed, 1 skipped。skipped 不是 passed，收集不会再因为缺 playwright 失败。安装见 `backend/requirements-dev.txt`。
 - 浏览器：`backend/.venv/bin/python scripts/check_branch_ui.py` 通过。预览里有勾选的两人，没有未勾选的第三人；合并后能选择发给哪一组；拆分后刷新，状态不是进行中。
 - 扩展：品牌版 Chrome 157 不接受 `--load-extension`。Chrome for Testing 加载 `extension/` 后，`scripts/check_web_bridge.py` 的夹具和 Gemini 都是 passed。夹具第二次提交含「公开答复」，停止后仍是 2 条用户气泡，房间里有 2 条完成回复，模型名是「Fixture 本地」。
 - Gemini：https://gemini.google.com/app ，游客，页面显示 Flash-Lite。扩展先发送「请用中文给两条简短读书建议，每条一句话。」，房间记下两条建议；合并后再把选中的公开答复发进同一个页面，房间记下第二条回复；停止后 4 秒内没有新的助手消息。没有点登录、订阅或模式切换。
@@ -123,6 +125,7 @@ bash scripts/start.sh
 - [设置，窄屏](docs/screenshots/settings-mobile.png)
 - [本机元宝发送后回到登录](docs/screenshots/yuanbao-vm-guest.png)
 - [协调方人工停止元宝，不是扩展回路](docs/screenshots/yuanbao-guest-stop-manual.webp)
+- [网页成员绑定字段](docs/screenshots/web-bind-member.png)
 
 ## 实际测试
 
@@ -195,7 +198,7 @@ git status --short
 
 分组和网页桥提交后，用下面的命令核对。若其后只有记下哈希的修订，以 `git rev-parse HEAD` 为准，并确认功能提交仍是祖先。
 
-边界修正和设置页在：
+网页成员表单、收藏、分歧和按授权注册内容脚本的提交，由下一笔交接记下哈希。此前的边界修正仍是祖先：
 
 `332bf76e4824b9ee872c20acf375779ef141ff92`
 

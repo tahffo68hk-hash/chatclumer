@@ -12,7 +12,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { RichText } from "@/components/rich-text";
 import { api, eventUrl } from "@/lib/api";
-import type { CatalogItem, ChatMessage, Member, RoomGroup, Session } from "@/lib/types";
+import type { CatalogItem, ChatMessage, HighlightCard, Member, RoomGroup, Session, SplitItem } from "@/lib/types";
 
 const MODES = [
   { id: "free_chat", label: "自由群聊" },
@@ -32,7 +32,7 @@ function clock(iso?: string | null) {
   }).format(new Date(iso));
 }
 
-function downloadRoom(kind: "md" | "json", sessionId: string | null, messages: ChatMessage[]) {
+function downloadRoom(kind: "md" | "json", sessionId: string | null, messages: ChatMessage[], cards: HighlightCard[]) {
   const rows = messages.map((message) => ({
     time: message.created_at,
     nickname: message.nickname,
@@ -41,9 +41,16 @@ function downloadRoom(kind: "md" | "json", sessionId: string | null, messages: C
     status: message.status,
     model: shownModel(message),
   }));
+  const saved = cards.map((card) => ({
+    title: card.title,
+    note: card.note,
+    nickname: card.nickname,
+    excerpt: card.excerpt,
+    disclaimer: card.disclaimer,
+  }));
   const body = kind === "json"
-    ? JSON.stringify(rows, null, 2)
-    : rows.map((row) => `## ${row.nickname || "房间"} · ${row.time}\n\n${row.content}`).join("\n\n");
+    ? JSON.stringify({ messages: rows, highlights: saved, disclaimer: "收藏的是讨论里的原话和备注，不是已核实事实。" }, null, 2)
+    : `${rows.map((row) => `## ${row.nickname || "房间"} · ${row.time}\n\n${row.content}`).join("\n\n")}\n\n# 收藏\n\n收藏的是讨论里的原话和备注，不是已核实事实。\n\n${saved.map((card) => `## ${card.title}\n\n${card.nickname}：${card.excerpt}\n\n备注：${card.note || "无"}`).join("\n\n")}`;
   const blob = new Blob([body], { type: kind === "json" ? "application/json" : "text/markdown" });
   const link = document.createElement("a");
   link.href = URL.createObjectURL(blob);
@@ -84,6 +91,30 @@ function phaseLabel(phase?: string | null) {
   return "";
 }
 
+const WEB_SITES = [
+  { id: "fixture", label: "本地夹具", origin: "http://127.0.0.1:43124/fixture/chat" },
+  { id: "gemini", label: "Gemini", origin: "https://gemini.google.com/app" },
+  { id: "yuanbao", label: "腾讯元宝", origin: "https://yuanbao.tencent.com/chat/" },
+  { id: "zhipu", label: "智谱清言 chatglm.cn", origin: "https://chatglm.cn/" },
+  { id: "doubao", label: "豆包", origin: "https://www.doubao.com/chat/" },
+  { id: "qwen", label: "Qwen", origin: "https://chat.qwen.ai/" },
+  { id: "deepseek", label: "DeepSeek", origin: "https://chat.deepseek.com/" },
+  { id: "chatgpt", label: "ChatGPT", origin: "https://chatgpt.com/" },
+  { id: "claude", label: "Claude", origin: "https://claude.ai/" },
+  { id: "grok", label: "Grok", origin: "https://grok.com/" },
+];
+
+function freshTabKey(site: string) {
+  return `${site}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function bindStatus(member: Member) {
+  if (member.provider !== "web") return "";
+  if (member.web_conversation === "needs_rebind" || member.web_conversation === "down") return "掉线";
+  if (member.web_origin && member.web_tab_key) return "已绑定标签页";
+  return "未绑定";
+}
+
 const emptyMember = {
   nickname: "",
   role_name: "",
@@ -93,6 +124,10 @@ const emptyMember = {
   api_base: "",
   api_key_env: "",
   enabled: true,
+  web_site: "fixture",
+  web_origin: WEB_SITES[0].origin,
+  web_tab_key: "",
+  web_auto: false,
 };
 
 export function ChatApp() {
@@ -111,6 +146,13 @@ export function ChatApp() {
   const [link, setLink] = useState<"ok" | "down">("ok");
   const [pairCode, setPairCode] = useState("");
   const [webMemory, setWebMemory] = useState<"rebind" | "retain">("rebind");
+  const [highlights, setHighlights] = useState<HighlightCard[]>([]);
+  const [cardsOpen, setCardsOpen] = useState(false);
+  const [splitsOpen, setSplitsOpen] = useState(false);
+  const [splits, setSplits] = useState<{ items: SplitItem[]; notice: string } | null>(null);
+  const [favFor, setFavFor] = useState<string | null>(null);
+  const [favTitle, setFavTitle] = useState("");
+  const [favNote, setFavNote] = useState("");
   const [catalog, setCatalog] = useState<CatalogItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -118,6 +160,7 @@ export function ChatApp() {
   const [sideTab, setSideTab] = useState<"rooms" | "members" | "records">("rooms");
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
   const [memberOpen, setMemberOpen] = useState(false);
+  const [connectOpen, setConnectOpen] = useState(false);
   const [memberForm, setMemberForm] = useState(emptyMember);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [secretOpen, setSecretOpen] = useState(false);
@@ -151,11 +194,12 @@ export function ChatApp() {
   }, []);
 
   const loadRoom = useCallback(async (id: string) => {
-    const [detail, msgs] = await Promise.all([api.session(id), api.messages(id)]);
+    const [detail, msgs, saved] = await Promise.all([api.session(id), api.messages(id), api.highlights(id)]);
     setSession(detail.session);
     setMembers(detail.members);
     setGroups(detail.groups || []);
     setMessages(msgs);
+    setHighlights(saved.cards);
     setSettings({
       max_rounds: detail.session.max_rounds,
       max_ai_messages: detail.session.max_ai_messages,
@@ -356,20 +400,40 @@ export function ChatApp() {
       api_base: member.api_base || "",
       api_key_env: member.api_key_env || "",
       enabled: member.enabled,
+      web_site: member.web_site || "fixture",
+      web_origin: member.web_origin || WEB_SITES.find((item) => item.id === (member.web_site || "fixture"))?.origin || "",
+      web_tab_key: member.web_tab_key || "",
+      web_auto: Boolean(member.web_auto),
     });
     setMemberOpen(true);
   }
 
   async function saveMember() {
     if (!currentId) return;
+    if (memberForm.provider === "web" && (!memberForm.web_origin.trim() || !memberForm.web_tab_key.trim())) {
+      setError("网页会话要填写页面地址和绑定键");
+      return;
+    }
     const body = {
-      ...memberForm,
+      nickname: memberForm.nickname,
+      role_name: memberForm.role_name,
+      persona: memberForm.persona,
+      provider: memberForm.provider,
+      model_id: memberForm.model_id,
       api_base: memberForm.api_base || null,
       api_key_env: memberForm.api_key_env || null,
+      enabled: memberForm.enabled,
     };
     try {
-      if (editingId) await api.patchMember(editingId, body);
-      else await api.addMember(currentId, body);
+      const saved = editingId ? await api.patchMember(editingId, body) : await api.addMember(currentId, body);
+      if (memberForm.provider === "web") {
+        await api.webBind(saved.id, {
+          web_site: memberForm.web_site,
+          web_origin: memberForm.web_origin.trim(),
+          web_tab_key: memberForm.web_tab_key.trim(),
+          web_auto: memberForm.web_auto,
+        });
+      }
       setMemberOpen(false);
       await loadRoom(currentId);
     } catch (err) {
@@ -475,6 +539,17 @@ export function ChatApp() {
                     <p className="mt-2 truncate font-mono text-[11px] text-[#e7d7c4]">
                       {member.provider} · {member.model_id}
                     </p>
+                    {member.provider === "web" && (
+                      <div className="mt-2 space-y-1 text-[11px] text-[#e7d7c4]" data-testid="web-card">
+                        <p data-testid="bind-status">{bindStatus(member)}</p>
+                        <label className="block">成员 ID
+                          <input readOnly data-testid="member-id" className="mt-1 w-full rounded bg-black/20 px-2 py-1 font-mono" value={member.id} />
+                        </label>
+                        <label className="block">绑定键
+                          <input readOnly data-testid="tab-key" className="mt-1 w-full rounded bg-black/20 px-2 py-1 font-mono" value={member.web_tab_key || ""} />
+                        </label>
+                      </div>
+                    )}
                     <div className="mt-2 flex gap-2">
                       <Button size="xs" variant="secondary" onClick={() => openEditMember(member)}>
                         编辑
@@ -488,6 +563,9 @@ export function ChatApp() {
                 <Button data-testid="add-member" variant="secondary" className="w-full" onClick={openCreateMember}>
                   <Plus /> 添加成员
                 </Button>
+                <Button data-testid="connect-web-help" variant="ghost" className="w-full text-[#f6f1e8]" onClick={() => setConnectOpen(true)}>
+                  连接网页 AI
+                </Button>
               </div>
             )}
             {sideTab !== "members" && sessions.length === 0 && <p className="px-2 text-sm text-[#d9cbb8]">还没有房间。</p>}
@@ -499,6 +577,14 @@ export function ChatApp() {
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="serif text-2xl">{session?.title || "选择一个房间"}</h2>
               <Button data-testid="open-settings" size="sm" variant="outline" onClick={() => setSettingsOpen(true)}>设置</Button>
+              <Button data-testid="open-cards" size="sm" variant="outline" disabled={!currentId} onClick={() => setCardsOpen(true)}>收藏</Button>
+              <Button data-testid="open-splits" size="sm" variant="outline" disabled={!currentId} onClick={() => {
+                if (!currentId) return;
+                void api.disagreements(currentId).then((payload) => {
+                  setSplits(payload);
+                  setSplitsOpen(true);
+                }).catch((err) => setError(err.message));
+              }}>分歧</Button>
               {session && (
                 <Badge data-testid="status-pill" variant={session.status === "running" ? "default" : "secondary"}>
                   {session.status_label}
@@ -602,7 +688,18 @@ export function ChatApp() {
             )}
             <div className="mx-auto flex max-w-3xl flex-col gap-3">
               {messages.map((message) => (
-                <MessageRow key={message.id} message={message} reply={message.reply_to_id ? byId.get(message.reply_to_id) : undefined} onReply={() => setReplyTo(message)} />
+                <MessageRow
+                  key={message.id}
+                  message={message}
+                  reply={message.reply_to_id ? byId.get(message.reply_to_id) : undefined}
+                  onReply={() => setReplyTo(message)}
+                  onFavorite={() => {
+                    const existing = highlights.find((card) => card.message_id === message.id);
+                    setFavFor(message.id);
+                    setFavTitle(existing?.title || "");
+                    setFavNote(existing?.note || "");
+                  }}
+                />
               ))}
               <div ref={bottomRef} />
             </div>
@@ -780,6 +877,74 @@ export function ChatApp() {
         ))}
       </nav>
 
+      <Dialog open={cardsOpen} onOpenChange={setCardsOpen}>
+        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>收藏</DialogTitle>
+            <DialogDescription>这些卡片只保留原话和你的备注。它们不是已核实事实。</DialogDescription>
+          </DialogHeader>
+          {highlights.length === 0 && <p data-testid="cards-empty">还没有收藏。</p>}
+          <div className="grid gap-3">
+            {highlights.map((card) => (
+              <article key={card.id} data-testid="highlight-card" className="rounded-xl border p-3 text-sm">
+                <p className="font-medium">{card.title}</p>
+                <p className="mt-1 text-xs text-[#6b6258]">{card.nickname || "房间"} · 讨论观点</p>
+                <p className="mt-2">{card.excerpt}</p>
+                {card.note && <p className="mt-1 text-[#6b6258]">备注：{card.note}</p>}
+                <p className="mt-2 text-xs text-[#9a3412]">{card.disclaimer}</p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <Button size="sm" variant="outline" data-testid="jump-card" onClick={() => jumpTo(card.message_id)}>回到原消息</Button>
+                  <Button size="sm" variant="outline" onClick={() => void navigator.clipboard.writeText(`${card.title}\n${card.nickname}：${card.excerpt}\n${card.note}\n${card.disclaimer}`)}>复制</Button>
+                  <Button size="sm" variant="ghost" onClick={() => currentId && api.deleteHighlight(currentId, card.id).then(() => loadRoom(currentId)).catch((err) => setError(err.message))}>移除</Button>
+                </div>
+              </article>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={splitsOpen} onOpenChange={setSplitsOpen}>
+        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>分歧</DialogTitle>
+            <DialogDescription>{splits?.notice}</DialogDescription>
+          </DialogHeader>
+          {splits && splits.items.length === 0 && <p data-testid="splits-empty">没有显式的质疑或反驳。这里不编共识。</p>}
+          <div className="grid gap-3">
+            {(splits?.items || []).map((item) => (
+              <article key={item.message_id} data-testid="split-card" className="rounded-xl border p-3 text-sm">
+                <p className="text-xs text-[#9a3412]">{item.kind} · {item.label} · 不是事实核查</p>
+                <p className="mt-2">{item.source_nickname}：{item.source_excerpt}</p>
+                <p className="mt-1">{item.nickname}：{item.excerpt}</p>
+                <div className="mt-2 flex gap-2">
+                  <Button size="sm" variant="outline" onClick={() => jumpTo(item.source_message_id)}>原消息</Button>
+                  <Button size="sm" variant="outline" onClick={() => jumpTo(item.message_id)}>这条回复</Button>
+                </div>
+              </article>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={!!favFor} onOpenChange={(open) => { if (!open) setFavFor(null); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>收藏这句</DialogTitle>
+            <DialogDescription>标题和备注只是你的索引。原话仍是讨论观点，不会因此变成事实。</DialogDescription>
+          </DialogHeader>
+          <label className="grid gap-1 text-sm">标题
+            <Input data-testid="fav-title" value={favTitle} maxLength={40} onChange={(event) => setFavTitle(event.target.value)} />
+          </label>
+          <label className="grid gap-1 text-sm">备注
+            <Input data-testid="fav-note" value={favNote} maxLength={200} onChange={(event) => setFavNote(event.target.value)} />
+          </label>
+          <Button data-testid="save-highlight" onClick={() => {
+            if (!currentId || !favFor) return;
+            void api.saveHighlight(currentId, { message_id: favFor, title: favTitle, note: favNote }).then(() => {
+              setFavFor(null);
+              return loadRoom(currentId);
+            }).catch((err) => setError(err.message));
+          }}>保存卡片</Button>
+        </DialogContent>
+      </Dialog>
       <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
         <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
           <DialogHeader>
@@ -810,14 +975,30 @@ export function ChatApp() {
             </label>
             <p className="text-xs text-[#6b6258]">Enter 发送，Shift+Enter 换行。输入法组合过程中不会发送。</p>
             <div className="flex flex-wrap gap-2">
-              <Button size="sm" variant="outline" data-testid="export-md" onClick={() => downloadRoom("md", currentId, messages)}>导出 Markdown</Button>
-              <Button size="sm" variant="outline" data-testid="export-json" onClick={() => downloadRoom("json", currentId, messages)}>导出 JSON</Button>
+              <Button size="sm" variant="outline" data-testid="export-md" onClick={() => downloadRoom("md", currentId, messages, highlights)}>导出 Markdown</Button>
+              <Button size="sm" variant="outline" data-testid="export-json" onClick={() => downloadRoom("json", currentId, messages, highlights)}>导出 JSON</Button>
             </div>
             <p className="text-xs text-[#6b6258]">导出只有当前房间的公开消息，不含配对令牌或密钥。</p>
             <Button size="sm" variant="secondary" data-testid="pair-code" onClick={() => void api.pairCode().then((item) => setPairCode(item.code)).catch((err) => setError(err.message))}>生成本机配对码</Button>
+            <Button size="sm" variant="outline" onClick={() => { setSettingsOpen(false); setConnectOpen(true); }}>连接网页 AI</Button>
             {pairCode && <p data-testid="pair-code-value">配对码 {pairCode}。粘贴到扩展弹窗。令牌不会出现在这里或聊天记录里。五分钟内有效，用一次即失效。</p>}
             <p className="text-xs text-[#6b6258]">手机可以打开群聊页面。网页发送要在开着扩展的这台电脑上完成。元宝和智谱在这台环境没有完成游客发送，不会自动发到登录页。</p>
           </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={connectOpen} onOpenChange={setConnectOpen}>
+        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>连接网页 AI</DialogTitle>
+            <DialogDescription>只在你这台电脑上、你点过授权的标签页里发送。扩展不读取 Cookie。</DialogDescription>
+          </DialogHeader>
+          <ol className="list-decimal space-y-2 pl-4 text-sm leading-6" data-testid="connect-steps">
+            <li>在设置里生成本机配对码，粘贴到扩展弹窗并点配对。令牌只留在扩展里，不会进聊天。</li>
+            <li>在成员里添加「网页会话」。选来源，填写页面地址和绑定键。需要房间代发时打开受控自动发送，然后保存。</li>
+            <li>成员卡片上有可选择复制的成员 ID 和绑定键。状态是未绑定、已绑定标签页，或掉线。</li>
+            <li>用普通 Chrome 打开那个页面。扩展弹窗填同一组 ID 和绑定键，点绑定当前标签页。元宝、智谱等要在这时允许该站点，扩展才会装上内容脚本。</li>
+            <li>夹具地址是 http://127.0.0.1:43124/fixture/chat 。Gemini 游客页可以绑定。元宝和智谱可以保存绑定，但公开回复的正文位置还没核实，房间不会自动点击发送。</li>
+          </ol>
         </DialogContent>
       </Dialog>
       <Dialog open={memberOpen} onOpenChange={setMemberOpen}>
@@ -841,11 +1022,13 @@ export function ChatApp() {
               onChange={(event) => {
                 const provider = event.target.value;
                 const preset = catalog.find((item) => item.provider === provider);
+                const site = memberForm.web_site || "fixture";
                 setMemberForm({
                   ...memberForm,
                   provider,
                   model_id: preset?.model_id || memberForm.model_id,
                   api_key_env: preset?.key_env || "",
+                  web_tab_key: provider === "web" && !memberForm.web_tab_key ? freshTabKey(site) : memberForm.web_tab_key,
                 });
               }}
             >
@@ -861,6 +1044,39 @@ export function ChatApp() {
             <Input value={memberForm.api_base} onChange={(event) => setMemberForm({ ...memberForm, api_base: event.target.value })} />
             <Label>密钥变量名（不在这里填密钥）</Label>
             <Input value={memberForm.api_key_env} onChange={(event) => setMemberForm({ ...memberForm, api_key_env: event.target.value })} />
+            {memberForm.provider === "web" && (
+              <div className="grid gap-3 rounded-xl border p-3" data-testid="web-fields">
+                <Label>来源</Label>
+                <select
+                  data-testid="web-site"
+                  className="h-9 rounded-lg border bg-white px-2 text-sm"
+                  value={memberForm.web_site}
+                  onChange={(event) => {
+                    const site = WEB_SITES.find((item) => item.id === event.target.value) || WEB_SITES[0];
+                    setMemberForm({
+                      ...memberForm,
+                      web_site: site.id,
+                      web_origin: site.origin,
+                      model_id: `web:${site.id}`,
+                      web_tab_key: memberForm.web_tab_key || freshTabKey(site.id),
+                    });
+                  }}
+                >
+                  {WEB_SITES.map((site) => (
+                    <option key={site.id} value={site.id}>{site.label}</option>
+                  ))}
+                </select>
+                <Label>页面地址</Label>
+                <Input data-testid="web-origin" value={memberForm.web_origin} onChange={(event) => setMemberForm({ ...memberForm, web_origin: event.target.value })} />
+                <Label>标签页绑定键</Label>
+                <Input data-testid="web-tab-key" value={memberForm.web_tab_key} onChange={(event) => setMemberForm({ ...memberForm, web_tab_key: event.target.value })} />
+                <div className="flex items-center justify-between text-sm">
+                  <span>受控自动发送</span>
+                  <Switch data-testid="web-auto" checked={memberForm.web_auto} onCheckedChange={(value) => setMemberForm({ ...memberForm, web_auto: value })} />
+                </div>
+                <p className="text-xs text-[#6b6258]">保存后会写入这个成员的网页绑定。绑定键要原样贴进扩展弹窗。元宝和智谱可以先绑定，正文位置未核实之前房间不会自动点击发送。</p>
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button data-testid="member-save" onClick={() => void saveMember()}>保存成员</Button>
@@ -1036,7 +1252,11 @@ function Field({ label, value, onChange, disabled }: { label: string; value: str
   );
 }
 
-function MessageRow({ message, reply, onReply }: { message: ChatMessage; reply?: ChatMessage; onReply: () => void }) {
+function jumpTo(id: string) {
+  document.getElementById(`msg-${id}`)?.scrollIntoView({ block: "center" });
+}
+
+function MessageRow({ message, reply, onReply, onFavorite }: { message: ChatMessage; reply?: ChatMessage; onReply: () => void; onFavorite: () => void }) {
   if (message.author_type === "system" && !message.is_summary) {
     return (
       <p data-testid="message" className="px-2 text-center text-xs text-[#6b6258]">
@@ -1047,6 +1267,8 @@ function MessageRow({ message, reply, onReply }: { message: ChatMessage; reply?:
   const discarded = message.status === "discarded" || message.status === "cancelled";
   return (
     <article
+      id={`msg-${message.id}`}
+      data-message-id={message.id}
       data-testid={message.is_summary ? "summary" : "message"}
       className={`rounded-2xl border bg-white px-3 py-3 ${message.is_summary ? "border-[#9a3412]" : "border-[#eadfce]"} ${discarded ? "opacity-60" : ""}`}
     >
@@ -1094,9 +1316,10 @@ function MessageRow({ message, reply, onReply }: { message: ChatMessage; reply?:
           {message.discarded_reason && <p className="mt-1 text-[11px] text-[#6b6258]">标记：{message.discarded_reason}</p>}
           {message.suggest_next_nickname && <p className="mt-1 text-[11px] text-[#6b6258]">建议下一位：{message.suggest_next_nickname}（仅供调度参考）</p>}
           {message.author_type !== "system" && message.status === "complete" && (
-            <button data-testid="reply-button" className="mt-2 text-xs text-[#9a3412]" onClick={onReply}>
-              回复
-            </button>
+            <span className="mt-2 flex gap-3">
+              <button data-testid="reply-button" className="text-xs text-[#9a3412]" onClick={onReply}>回复</button>
+              <button data-testid="favorite-button" className="text-xs text-[#9a3412]" onClick={onFavorite}>收藏</button>
+            </span>
           )}
         </div>
       </div>

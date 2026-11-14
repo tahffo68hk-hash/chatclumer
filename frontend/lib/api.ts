@@ -1,4 +1,4 @@
-import type { CatalogItem, ChatMessage, Member, RoomGroup, Session } from "./types";
+import type { CatalogItem, ChatMessage, HighlightCard, Member, RoomGroup, Session, SplitItem } from "./types";
 
 const base = process.env.NEXT_PUBLIC_API_BASE || "/backend";
 
@@ -37,6 +37,8 @@ export const api = {
   addMember: (id: string, body: Record<string, unknown>) =>
     request<Member>(`/api/sessions/${id}/members`, { method: "POST", body: JSON.stringify(body) }),
   patchMember: (id: string, body: Record<string, unknown>) => request<Member>(`/api/members/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  webBind: (id: string, body: { web_site: string; web_origin: string; web_tab_key: string; web_auto: boolean }) =>
+    request<Member>(`/api/members/${id}/web-bind`, { method: "POST", body: JSON.stringify(body) }),
   deleteMember: (id: string) => request(`/api/members/${id}`, { method: "DELETE" }),
   messages: (id: string) => request<ChatMessage[]>(`/api/sessions/${id}/messages`),
   send: (id: string, content: string, reply_to_id?: string | null, mode?: string, audience?: string, group_id?: string) =>
@@ -57,6 +59,13 @@ export const api = {
       body: JSON.stringify({ member_ids, carry, web_memory }),
     }),
   pairCode: () => request<{ code: string; expires_at: string }>("/api/ext/code", { method: "POST" }),
+  highlights: (id: string) => request<{ cards: HighlightCard[]; disclaimer: string }>(`/api/sessions/${id}/highlights`),
+  saveHighlight: (id: string, body: { message_id: string; title: string; note: string }) =>
+    request(`/api/sessions/${id}/highlights`, { method: "PUT", body: JSON.stringify(body) }),
+  deleteHighlight: (id: string, highlightId: string) =>
+    request(`/api/sessions/${id}/highlights/${highlightId}`, { method: "DELETE" }),
+  disagreements: (id: string) =>
+    request<{ items: SplitItem[]; consensus: never[]; notice: string }>(`/api/sessions/${id}/disagreements`),
   pause: (id: string) => request(`/api/sessions/${id}/pause`, { method: "POST" }),
   resume: (id: string) => request(`/api/sessions/${id}/resume`, { method: "POST" }),
   stop: (id: string) => request(`/api/sessions/${id}/stop`, { method: "POST" }),

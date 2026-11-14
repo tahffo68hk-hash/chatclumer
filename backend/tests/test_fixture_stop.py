@@ -1,3 +1,8 @@
+import pytest
+
+pytest.importorskip("playwright.sync_api")
+pytestmark = pytest.mark.browser
+
 from playwright.sync_api import sync_playwright
 
 from app.main import FIXTURE_HTML

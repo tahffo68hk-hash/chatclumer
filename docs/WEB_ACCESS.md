@@ -53,7 +53,10 @@
 - 本机元宝尝试：[发送没有形成回复](screenshots/yuanbao-vm-guest.png)。
 - 品牌版 Chrome 可以在 `chrome://extensions` 打开开发者模式，选择「加载已解压的扩展程序」并选中 `extension/`。命令行 `--load-extension` 被忽略，不代表不能手工加载。
 - 配对码在房间的「设置」里生成，只在本机页面 http://127.0.0.1:43123 上签发。粘贴到扩展弹窗后，令牌留在扩展里，不会写入聊天或导出文件。
+- 网页成员在添加或编辑时填写来源、页面地址、绑定键和受控自动发送。保存会调用 `/api/members/{id}/web-bind`。成员卡片上的成员 ID 和绑定键可以选中复制。状态分为未绑定、已绑定标签页、掉线。分步说明在成员栏和设置里的「连接网页 AI」。
 - 手机可以打开群聊。网页桥仍要这台开着扩展的电脑。拆出成员默认解除原标签页，绑定新会话前不会再向原网页发送。选择「沿用已有记忆」才会继续用原来的标签，并且页面会说明原网页还记得已读内容。
 - 设了 token 上限时，网页成员直接拒绝，不会把字符数当成精确 token。分支房间的消息条数和时间不因合并或再次开始而清零。
+- 清单里的 content_scripts 只有本机夹具和 Gemini。元宝、智谱、豆包只在 optional_host_permissions 里。绑定这些站点时，扩展会请求该源的主机权限，再用 `chrome.scripting.registerContentScripts` 登记 `content.js`，并注入当前标签。没有授予就不会注入。这不等于正文选择器已经核实。
+- 元宝只使用见过的 `[contenteditable='true'][data-placeholder='Send Message']`、`aria-label=Send` 和精确的 Stop Answering。公开回复的正文节点没有核实，扩展拒绝点击发送，也不读取整页文字。智谱没有可靠正文位置，标为未验证，不会发送。
 - Qwen 只写在 `docs/qwen-run.json`，是手动 DOM，不是扩展端到端。
 - 品牌版 Chrome 装不上扩展时，不能把手动打开网页说成真实站点端到端已经通过。

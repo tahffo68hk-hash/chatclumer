@@ -64,7 +64,41 @@ async function report(token, job, result) {
   }).catch(() => {});
 }
 
+const STATIC_ORIGINS = new Set(["http://127.0.0.1:43124", "https://gemini.google.com"]);
+
+function scriptId(origin) {
+  return `room-${origin.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").slice(0, 60)}`;
+}
+
+async function ensureScript(origin, tabId) {
+  if (STATIC_ORIGINS.has(origin)) return { ok: true, how: "manifest" };
+  const pattern = `${origin}/*`;
+  const allowed = await chrome.permissions.contains({ origins: [pattern] });
+  if (!allowed) return { ok: false, detail: "主机权限未授予，没有注册内容脚本" };
+  const id = scriptId(origin);
+  const existing = await chrome.scripting.getRegisteredContentScripts({ ids: [id] });
+  if (!existing.length) {
+    await chrome.scripting.registerContentScripts([
+      {
+        id,
+        matches: [pattern],
+        js: ["content.js"],
+        runAt: "document_idle",
+        persistAcrossSessions: true,
+      },
+    ]);
+  }
+  if (tabId) await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] });
+  return { ok: true, how: "dynamic", id };
+}
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === "ensure-script") {
+    ensureScript(message.origin, message.tabId).then(sendResponse).catch((err) => {
+      sendResponse({ ok: false, detail: err?.message || "内容脚本没有装上" });
+    });
+    return true;
+  }
   if (message?.type === "save-binding") {
     chrome.storage.local.get(["bindings"]).then(({ bindings }) => {
       const next = bindings || {};

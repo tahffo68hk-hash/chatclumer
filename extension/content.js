@@ -11,6 +11,8 @@ function dangerous(el) {
 function siteFrom(url) {
   if (url.startsWith("http://127.0.0.1:43124/fixture")) return "fixture";
   if (url.startsWith("https://gemini.google.com/")) return "gemini";
+  if (url.startsWith("https://yuanbao.tencent.com/")) return "yuanbao";
+  if (url.startsWith("https://chatglm.cn/")) return "zhipu";
   return "";
 }
 
@@ -47,6 +49,29 @@ const adapters = {
       const text = (el.innerText || "").trim();
       return text === "New chat" || text === "新对话" ? el : null;
     },
+  },
+  yuanbao: {
+    composer: () => document.querySelector("[contenteditable='true'][data-placeholder='Send Message']"),
+    send: () => {
+      const el = document.querySelector("[aria-label='Send']");
+      return el && !dangerous(el) && !el.hidden ? el : null;
+    },
+    assistants: () => [],
+    text: () => "",
+    done: () => false,
+    model: () => "",
+    openNew: () => null,
+    refuse: "元宝公开回复的正文位置还没有核实，不会点击发送，也不会用整页文字代替回复。",
+  },
+  zhipu: {
+    composer: () => null,
+    send: () => null,
+    assistants: () => [],
+    text: () => "",
+    done: () => false,
+    model: () => "",
+    openNew: () => null,
+    refuse: "智谱公开回复的正文位置未验证，不会发送，也不会用整页文字代替回复。",
   },
 };
 
@@ -88,7 +113,7 @@ async function waitNew(adapter, before, signal) {
 
 function clickSiteStop() {
   const labels = new Set(["Stop", "Stop response", "Stop Answering", "停止", "停止生成", "停止回答", "停止对话"]);
-  const el = [...document.querySelectorAll("button")].find((node) => {
+  const el = [...document.querySelectorAll("[aria-label]")].find((node) => {
     return labels.has(node.getAttribute("aria-label") || "") && !dangerous(node) && !node.hidden;
   });
   if (!el) return false;
@@ -134,6 +159,7 @@ async function runJob(job) {
   const site = siteFrom(location.href);
   const adapter = adapters[site];
   if (!adapter || site !== job.site) return { status: "error", detail: "当前页和任务站点不一致", page_url: pageUrl };
+  if (adapter.refuse) return { status: "error", detail: adapter.refuse, page_url: pageUrl };
   if (sent.has(job.request_id)) return { status: "error", detail: "这个请求已经提交过，刷新后不会再点发送", page_url: pageUrl };
   if (job.action === "cancel") return { status: "cancelled", page_url: pageUrl };
   if (busy) return { status: "error", detail: "这个标签页正在处理上一条", page_url: pageUrl };
@@ -184,6 +210,8 @@ async function runJob(job) {
 
 let pending = null;
 
+if (!globalThis.__roomBridge) {
+globalThis.__roomBridge = true;
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!message || message.type !== "run") return;
   if (busy) {
@@ -199,3 +227,4 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   });
   return true;
 });
+}

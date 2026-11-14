@@ -19,6 +19,7 @@ from .engine import RoomEngine
 from .providers import CATALOG, RoutedProvider
 from .secrets import ALLOWED_SECRET_NAMES, SecretStore
 from .groups import share_plan
+from .opinions import CARD_NOTE, discussion_splits
 from .util import reason_label, redact, status_label
 from .webbridge import SITE_STATUS, SITES, WebBridge, origin_of, site_for_origin
 
@@ -206,6 +207,12 @@ class JobResultIn(BaseModel):
 
 class RunIn(BaseModel):
     mode: str | None = None
+
+
+class HighlightIn(BaseModel):
+    message_id: str
+    title: str
+    note: str = ""
 
 
 class SecretIn(BaseModel):
@@ -625,6 +632,58 @@ def create_app(db_path: str | None = None, secrets_path: str | None = None, prov
         if not database.get_session(session_id):
             raise HTTPException(404, "找不到房间")
         return database.list_messages(session_id)
+
+    @app.get("/api/sessions/{session_id}/highlights")
+    def list_highlights(session_id: str):
+        if not database.get_session(session_id):
+            raise HTTPException(404, "找不到房间")
+        messages = {item["id"]: item for item in database.list_messages(session_id)}
+        cards = []
+        for row in database.list_highlights(session_id):
+            message = messages.get(row["message_id"])
+            if not message:
+                continue
+            cards.append(
+                {
+                    **row,
+                    "nickname": message.get("nickname") or "",
+                    "member_id": message.get("member_id"),
+                    "excerpt": (message.get("content") or "")[:180],
+                    "disclaimer": CARD_NOTE,
+                }
+            )
+        return {"cards": cards, "disclaimer": CARD_NOTE}
+
+    @app.put("/api/sessions/{session_id}/highlights")
+    def put_highlight(session_id: str, body: HighlightIn):
+        if not database.get_session(session_id):
+            raise HTTPException(404, "找不到房间")
+        message = database.get_message(body.message_id)
+        if not message or message["session_id"] != session_id:
+            raise HTTPException(404, "找不到原消息")
+        if message["status"] != "complete":
+            raise HTTPException(400, "只能收藏已经说完的消息")
+        title = body.title.strip()
+        note = body.note.strip()
+        if not title or len(title) > 40 or len(note) > 200:
+            raise HTTPException(400, "标题 1 到 40 字，备注不超过 200 字")
+        saved = database.save_highlight(session_id, body.message_id, title, note)
+        saved["disclaimer"] = CARD_NOTE
+        return saved
+
+    @app.delete("/api/sessions/{session_id}/highlights/{highlight_id}")
+    def remove_highlight(session_id: str, highlight_id: str):
+        if not database.get_session(session_id):
+            raise HTTPException(404, "找不到房间")
+        if not database.delete_highlight(session_id, highlight_id):
+            raise HTTPException(404, "找不到这张卡片")
+        return {"ok": True}
+
+    @app.get("/api/sessions/{session_id}/disagreements")
+    def list_disagreements(session_id: str):
+        if not database.get_session(session_id):
+            raise HTTPException(404, "找不到房间")
+        return discussion_splits(database.list_messages(session_id))
 
     @app.post("/api/sessions/{session_id}/messages")
     async def post_message(session_id: str, body: MessageIn):
