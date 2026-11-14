@@ -22,6 +22,7 @@ REASON_LABELS = {
     "server_restart": "服务重启，讨论已停止且未自动重开",
     "no_members": "没有可发言的成员",
     "no_user_message": "没有用户问题",
+    "branches_settled": "各分支已答完，未再跨组发言",
 }
 
 STATUS_LABELS = {

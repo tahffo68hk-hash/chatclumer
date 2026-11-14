@@ -30,6 +30,8 @@ LAN=1 bash scripts/start.sh
 
 复制 `.env.example` 里的名字到环境变量，或在页面「密钥」里写入服务器文件 `backend/data/secrets.json`（权限 600）。接口只返回是否已配置，不回显原文。可能计费的云端调用需要 `ALLOW_PAID_PROVIDERS=1`，默认关闭。Ollama 只连接 `OLLAMA_BASE_URL`，不会下载模型。
 
+网页成员和分组说明在 `docs/WEB_ACCESS.md`。扩展只配对本机 `127.0.0.1:43124`，不会读取 Cookie。
+
 ## 测试
 
 ```bash

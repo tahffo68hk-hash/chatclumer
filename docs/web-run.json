@@ -1,0 +1,43 @@
+{
+  "date": "2026-11-14",
+  "extension_loaded": true,
+  "fixture": {
+    "through": "extension",
+    "result": "passed",
+    "url": "http://127.0.0.1:43124/fixture/chat",
+    "guest": true,
+    "displayed_model": "Fixture 本地",
+    "first_user_count": 1,
+    "first_reply": "夹具收到：请用中文给两条简短读书建议，每条一句话。",
+    "second_prompt_has_public_reply": true,
+    "second_reply": "夹具收到：下面只转发被选中的公开答复。请根据这段补充或质疑，不要重复上一问。 【分组合并】新建讨论组，只带上选中的公开答复。 只会把下面这些公开答复交给新的讨论组。未选中的历史不会默认传过去。原消息仍留在时间线上。 - 来源 ef7ecc3dffb743f9 · 网页甲 的独立分支 · 网页甲：夹具收到：请用中文给两条简短读书建议，每条一句话。 - 来源 b",
+    "user_count_after_stop": 2,
+    "room_complete_replies": 2,
+    "second_reply_stored": true,
+    "room_model": "Fixture 本地"
+  },
+  "sites": [
+    {
+      "date": "2026-11-14",
+      "url": "https://gemini.google.com/app",
+      "through": "extension",
+      "guest": true,
+      "displayed_model": "Flash-Lite",
+      "actions": [
+        "游客输入框可见，未点击登录、升级或模式切换",
+        "经扩展提交第一条读书建议问题",
+        "读到新回复：Gemini said\n\n建议一：带着明确的目的和问题去阅读，能够大幅提升对知识的吸收效率和理解深度。\n\n建议二：读完后及时进行输出与实践，将书中的观点转化为自己的语言或行动，才能真正内化知识。",
+        "合并后让扩展转发另一成员的公开答复",
+        "停止后等待 4 秒，确认没有新的助手消息"
+      ],
+      "result": "passed",
+      "http_status": 200,
+      "landed_url": "https://gemini.google.com/app",
+      "room_complete_replies": 2,
+      "room_model": "Flash-Lite",
+      "second_reply": "Gemini said\n\n结合两支分支的输入：\n\n网页乙提供了针对原始请求的具体内容交付（两条简短、结构清晰的读书建议）。\n\n本地甲则从系统架构与实现的视角切入，指出对于这类轻量级任务，核心应当是精简的调度路径与明确的失败边界（如超时、费用与状态控制），而非过度设计的代理框架。\n\n如果将本地甲的工程视角映射回内容创作本身，这也启示我们：越是简短直接的知识输出（如“带目的阅读”与“及时输出”），越需要高效、无冗余的执行逻辑，直击核心，避免信息过载。"
+    }
+  ],
+  "extension_id": "gijbnibpnojhblapndoejihljkaimikf",
+  "browser": "Chrome for Testing via Playwright. Branded Chrome 157 on this machine ignores --load-extension, so the unpacked extension was not loaded there."
+}

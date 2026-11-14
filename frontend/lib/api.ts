@@ -1,4 +1,4 @@
-import type { CatalogItem, ChatMessage, Member, Session } from "./types";
+import type { CatalogItem, ChatMessage, Member, RoomGroup, Session } from "./types";
 
 const base = process.env.NEXT_PUBLIC_API_BASE || "/backend";
 
@@ -30,7 +30,7 @@ export const api = {
   integrations: () => request<{ qq: { state: string; detail: string }; wechat: { state: string; detail: string } }>("/api/integrations/status"),
   sessions: () => request<Session[]>("/api/sessions"),
   createSession: (body: Record<string, unknown>) => request<Session>("/api/sessions", { method: "POST", body: JSON.stringify(body) }),
-  session: (id: string) => request<{ session: Session; members: Member[] }>(`/api/sessions/${id}`),
+  session: (id: string) => request<{ session: Session; members: Member[]; groups?: RoomGroup[] }>(`/api/sessions/${id}`),
   patchSession: (id: string, body: Record<string, unknown>) =>
     request<Session>(`/api/sessions/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteSession: (id: string) => request(`/api/sessions/${id}`, { method: "DELETE" }),
@@ -39,8 +39,23 @@ export const api = {
   patchMember: (id: string, body: Record<string, unknown>) => request<Member>(`/api/members/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteMember: (id: string) => request(`/api/members/${id}`, { method: "DELETE" }),
   messages: (id: string) => request<ChatMessage[]>(`/api/sessions/${id}/messages`),
-  send: (id: string, content: string, reply_to_id?: string | null, mode?: string) =>
-    request(`/api/sessions/${id}/messages`, { method: "POST", body: JSON.stringify({ content, reply_to_id, mode }) }),
+  send: (id: string, content: string, reply_to_id?: string | null, mode?: string, audience?: string, group_id?: string) =>
+    request(`/api/sessions/${id}/messages`, {
+      method: "POST",
+      body: JSON.stringify({ content, reply_to_id, mode, audience, group_id }),
+    }),
+  previewMerge: (id: string, member_ids: string[]) =>
+    request<{ note: string; shares: { message_id: string; nickname: string; excerpt: string }[] }>(
+      `/api/sessions/${id}/groups/preview`,
+      { method: "POST", body: JSON.stringify({ member_ids }) },
+    ),
+  merge: (id: string, member_ids: string[]) =>
+    request(`/api/sessions/${id}/groups/merge`, { method: "POST", body: JSON.stringify({ member_ids }) }),
+  split: (id: string, group_id: string, member_ids: string[], carry: "public" | "fresh") =>
+    request(`/api/sessions/${id}/groups/${group_id}/split`, {
+      method: "POST",
+      body: JSON.stringify({ member_ids, carry }),
+    }),
   pause: (id: string) => request(`/api/sessions/${id}/pause`, { method: "POST" }),
   resume: (id: string) => request(`/api/sessions/${id}/resume`, { method: "POST" }),
   stop: (id: string) => request(`/api/sessions/${id}/stop`, { method: "POST" }),

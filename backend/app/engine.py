@@ -9,7 +9,8 @@ import time
 from datetime import datetime, timedelta, timezone
 
 from .db import Database
-from .providers import GenRequest, ProviderError, render_prompt
+from .groups import quote_block, same_active_group, share_plan, visible_messages
+from .providers import GenRequest, ProviderError, render_prompt, web_forward_text
 from .summary import build_summary
 from .util import excerpt, infer_new_point, mention_ids, new_id, now_iso, reason_label, redact, status_for
 
@@ -91,6 +92,9 @@ class RoomEngine:
         reply_to_id: str | None = None,
         mode: str | None = None,
         author_type: str = "user",
+        audience: str | None = None,
+        group_id: str | None = None,
+        target_member_id: str | None = None,
     ) -> dict:
         if author_type != "user":
             return {"ok": False, "error": "model_output_cannot_trigger"}
@@ -106,6 +110,19 @@ class RoomEngine:
                 return {"ok": False, "error": "bad_reply"}
         if mode:
             self.db.update_settings(session_id, {"mode": mode})
+        layout = session.get("layout") or "shared"
+        if layout == "branches":
+            audience = audience or "all"
+            if audience not in {"all", "group", "member"}:
+                return {"ok": False, "error": "bad_audience"}
+            if audience == "group" and not group_id:
+                return {"ok": False, "error": "bad_audience"}
+            if audience == "member" and not target_member_id:
+                return {"ok": False, "error": "bad_audience"}
+        else:
+            audience = None
+            group_id = None
+            target_member_id = None
         version = self.db.bump_context(session_id)
         session = self.db.get_session(session_id)
         message = self.db.add_message(
@@ -119,8 +136,13 @@ class RoomEngine:
                 "context_version": version,
                 "run_token": session.get("run_token") if session["status"] in {"running", "paused"} else None,
                 "finished_at": now_iso(),
+                "audience": audience,
+                "group_id": group_id,
+                "target_member_id": target_member_id,
             }
         )
+        if layout == "branches":
+            self._wake_groups(session_id, audience or "all", group_id, target_member_id)
         if session["title"] in {"", "未命名群聊"}:
             self.db.update_settings(session_id, {"title": text[:24]})
         self._pulse_stale(session_id)
@@ -181,6 +203,9 @@ class RoomEngine:
         if session["status"] not in {"running", "paused"}:
             return {"ok": True, "already": True}
         self.db.stop_session(session_id, session.get("run_token"), "user_stop")
+        web = getattr(self, "web", None)
+        if web:
+            web.cancel_session(session_id, "user_stop")
         cancel = self.cancels.get(session_id)
         if cancel:
             cancel.set()
@@ -251,6 +276,9 @@ class RoomEngine:
             return
 
     async def _loop(self, session_id: str, run_token: str, cancel: asyncio.Event) -> str:
+        session = self.db.get_session(session_id)
+        if session and session.get("layout") == "branches":
+            return await self._branch_loop(session_id, run_token, cancel)
         while not cancel.is_set():
             if not await self._wait_running(session_id, cancel):
                 session = self.db.get_session(session_id)
@@ -362,6 +390,284 @@ class RoomEngine:
         if ids:
             return [member for member in members if member["id"] in ids]
         return members
+
+    def _wake_groups(self, session_id: str, audience: str, group_id: str | None, target_member_id: str | None) -> None:
+        groups = self.db.list_groups(session_id)
+        if audience == "all":
+            ids = [item["id"] for item in groups if item["status"] == "active"]
+        elif audience == "group" and group_id:
+            ids = [group_id]
+        elif audience == "member" and target_member_id:
+            found = self.db.active_group_id(target_member_id)
+            ids = [found] if found else []
+        else:
+            ids = []
+        if ids:
+            self.db.set_groups_settled(ids, False)
+
+    def _group_idle(self, group: dict, members: list[dict], messages: list[dict]) -> bool:
+        pending_independent = False
+        for member in members:
+            transcript = visible_messages(messages, group["id"], member["id"])
+            markers = [
+                item
+                for item in transcript
+                if item["author_type"] == "user" or item.get("event_kind") in {"merge", "split", "share"}
+            ]
+            if not markers:
+                continue
+            mark = markers[-1]["context_version"]
+            answered = any(
+                item["author_type"] == "ai"
+                and item.get("member_id") == member["id"]
+                and item.get("group_id") == group["id"]
+                and item["context_version"] >= mark
+                for item in transcript
+            )
+            if not answered:
+                pending_independent = True
+        if pending_independent:
+            return False
+        if group["kind"] == "branch" or len(members) < 2:
+            return True
+        transcript = visible_messages(messages, group["id"], members[0]["id"])
+        crosses = [item for item in transcript if item.get("phase") == "cross"]
+        if not crosses:
+            return False
+        return not crosses[-1].get("has_new_point")
+
+    def _plan_group(self, group: dict, members: list[dict], messages: list[dict], text: str, everyone: list[dict]) -> list[dict]:
+        mentioned = set(mention_ids(text, everyone))
+        pool = [member for member in members if not mentioned or member["id"] in mentioned]
+        plans = []
+        for member in pool:
+            transcript = visible_messages(messages, group["id"], member["id"])
+            markers = [
+                item
+                for item in transcript
+                if item["author_type"] == "user" or item.get("event_kind") in {"merge", "split", "share"}
+            ]
+            if not markers:
+                continue
+            mark = markers[-1]["context_version"]
+            answered = any(
+                item["author_type"] == "ai"
+                and item.get("member_id") == member["id"]
+                and item.get("group_id") == group["id"]
+                and item["context_version"] >= mark
+                for item in transcript
+            )
+            if not answered:
+                plans.append({"phase": "independent", "member": member, "peers": pool, "transcript": transcript, "group": group})
+        if plans or group["kind"] == "branch" or len(pool) < 2:
+            return plans
+        transcript = visible_messages(messages, group["id"], pool[0]["id"])
+        last = next((item for item in reversed(transcript) if item["author_type"] == "ai"), None)
+        ranked = sorted(
+            pool,
+            key=lambda member: (
+                sum(1 for item in transcript if item.get("member_id") == member["id"] and item.get("phase") == "cross"),
+                member["id"] == (last or {}).get("member_id"),
+            ),
+        )
+        speaker = ranked[0]
+        speaker_transcript = visible_messages(messages, group["id"], speaker["id"])
+        return [{"phase": "cross", "member": speaker, "peers": pool, "transcript": speaker_transcript, "group": group}]
+
+    async def _branch_loop(self, session_id: str, run_token: str, cancel: asyncio.Event) -> str:
+        while not cancel.is_set():
+            if not await self._wait_running(session_id, cancel):
+                session = self.db.get_session(session_id)
+                return (session or {}).get("end_reason") or "user_stop"
+            session = self.db.get_session(session_id)
+            if session["status"] in {"stopped", "finished", "failed"}:
+                return session.get("end_reason") or "user_stop"
+            if session.get("run_token") != run_token:
+                return "engine_error"
+            expired = self._expire_if_needed(session_id, session)
+            if expired:
+                return expired
+            budget = self._over_budget(session)
+            if budget:
+                return budget
+            messages = self.db.list_messages(session_id)
+            if not any(item["author_type"] == "user" and item["status"] == "complete" for item in messages):
+                return "no_user_message"
+            active = [item for item in self.db.list_groups(session_id) if item["status"] == "active"]
+            everyone = [item for item in self.db.list_members(session_id) if item["enabled"]]
+            latest_user = next((item["content"] for item in reversed(messages) if item["author_type"] == "user"), "")
+            work = []
+            for group in active:
+                if group.get("settled"):
+                    continue
+                members = [self.db.get_member(mid) for mid in group["member_ids"]]
+                members = [item for item in members if item and item["enabled"]]
+                if not members:
+                    continue
+                if self._group_idle(group, members, messages):
+                    self.db.set_groups_settled([group["id"]], True)
+                    continue
+                if session["current_round"] >= session["max_rounds"]:
+                    continue
+                plans = self._plan_group(group, members, messages, latest_user, everyone)
+                work.extend(plans)
+            active = [item for item in self.db.list_groups(session_id) if item["status"] == "active"]
+            if active and all(item.get("settled") for item in active):
+                return "branches_settled"
+            if not work:
+                if session["current_round"] >= session["max_rounds"]:
+                    return "limit_rounds"
+                continue
+            round_no = self.db.inc_round(session_id)
+            self._system(session_id, f"第 {round_no} 轮 · 各分支只看见自己的公开上下文", round_no)
+            version = self.db.get_session(session_id)["context_version"]
+            session = self.db.get_session(session_id)
+            serial = session["max_tokens"] is not None or session["max_cost_usd"] is not None
+
+            async def one(plan: dict) -> str:
+                if not await self._wait_running(session_id, cancel):
+                    return "stopped"
+                if self.db.get_session(session_id)["context_version"] != version:
+                    return "version_changed"
+                fresh = self.db.get_session(session_id)
+                return await self._speak(
+                    session_id,
+                    run_token,
+                    cancel,
+                    plan["member"],
+                    plan["peers"],
+                    plan["phase"],
+                    round_no,
+                    version,
+                    discussion_cap(fresh),
+                    plan["transcript"],
+                    group_id=plan["group"]["id"],
+                    group_generation=int(plan["group"]["generation"]),
+                )
+
+            results: list[str] = []
+            if serial:
+                for plan in work:
+                    results.append(await one(plan))
+                    if results[-1] in LIMITS or results[-1] == "stopped":
+                        break
+            else:
+                results = list(await asyncio.gather(*[one(plan) for plan in work]))
+            reduced = self._reduce(results)
+            if reduced == "version_changed":
+                continue
+            if reduced == "stopped":
+                return self.db.get_session(session_id).get("end_reason") or "user_stop"
+            if reduced in LIMITS or reduced == "provider_failed":
+                return reduced
+        session = self.db.get_session(session_id)
+        return (session or {}).get("end_reason") or "user_stop"
+
+    async def merge_groups(self, session_id: str, member_ids: list[str], message_ids: list[str] | None = None) -> dict:
+        if len(set(member_ids)) < 2:
+            return {"ok": False, "error": "need_two"}
+        existing = same_active_group(self.db, member_ids)
+        if existing and not message_ids:
+            return {"ok": True, "already": True, "group": existing, "preview": share_plan(self.db, session_id, member_ids, None)}
+        try:
+            plan = share_plan(self.db, session_id, member_ids, message_ids)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        names = [self.db.get_member(mid)["nickname"] for mid in member_ids]
+        version = self.db.bump_context(session_id)
+        session = self.db.get_session(session_id)
+        if existing and message_ids:
+            self.db.bump_groups([existing["id"]])
+            self.db.add_message(
+                {
+                    "session_id": session_id,
+                    "author_type": "system",
+                    "nickname": "房间",
+                    "content": quote_block(plan, f"【再次合并】小组「{existing['name']}」只追加这些公开答复。"),
+                    "status": "complete",
+                    "phase": "meta",
+                    "context_version": version,
+                    "run_token": session.get("run_token"),
+                    "group_id": existing["id"],
+                    "event_kind": "share",
+                    "source_message_id": plan["shares"][0]["message_id"] if plan["shares"] else None,
+                    "finished_at": now_iso(),
+                }
+            )
+            self._pulse_stale(session_id)
+            self._cancel_web_members(member_ids, "group_changed")
+            self.publish_state(session_id)
+            return {"ok": True, "already": True, "group": self.db.get_group(existing["id"]), "preview": plan}
+        group = self.db.move_members(
+            session_id,
+            member_ids,
+            kind="discussion",
+            name="讨论 " + "、".join(names),
+            event_kind="merge",
+            event_text=quote_block(plan, "【分组合并】新建讨论组，只带上选中的公开答复。"),
+            context_version=version,
+            run_token=session.get("run_token"),
+        )
+        self._pulse_stale(session_id)
+        self._cancel_web_members(member_ids, "group_changed")
+        self.publish_state(session_id)
+        return {"ok": True, "already": False, "group": group, "preview": plan}
+
+    async def split_group(
+        self,
+        session_id: str,
+        group_id: str,
+        member_ids: list[str],
+        carry: str,
+        message_ids: list[str] | None = None,
+    ) -> dict:
+        group = self.db.get_group(group_id)
+        if not group or group["session_id"] != session_id:
+            return {"ok": False, "error": "missing_group"}
+        if carry not in {"public", "fresh"}:
+            return {"ok": False, "error": "bad_carry"}
+        if not member_ids or any(mid not in group["member_ids"] for mid in member_ids):
+            return {"ok": False, "error": "bad_members"}
+        if set(member_ids) == set(group["member_ids"]):
+            return {"ok": False, "error": "leave_someone"}
+        plan = {"shares": [], "note": "新分支不接收原组之后的发言。已经看见的网页内容不会因此被忘掉。"}
+        if carry == "public":
+            try:
+                plan = share_plan(self.db, session_id, member_ids, message_ids)
+            except ValueError as exc:
+                return {"ok": False, "error": str(exc)}
+            title = "【拆分】带走下列已公开的答复。拆出后不再接收原组的新发言。模型已经看见的内容不会被宣称忘掉。"
+        else:
+            title = "【拆分】从新分支开始，不附带原组历史。拆出后不再接收原组的新发言。若网页会话里已经有旧内容，模型仍可能记得；站点若不能新开对话，会标明能力受限。"
+        names = [self.db.get_member(mid)["nickname"] for mid in member_ids]
+        version = self.db.bump_context(session_id)
+        session = self.db.get_session(session_id)
+        kind = "branch" if len(member_ids) == 1 else "discussion"
+        name = f"{names[0]} 的新分支" if len(member_ids) == 1 else "拆出 " + "、".join(names)
+        created = self.db.move_members(
+            session_id,
+            member_ids,
+            kind=kind,
+            name=name,
+            event_kind="split",
+            event_text=quote_block(plan, title),
+            context_version=version,
+            run_token=session.get("run_token"),
+        )
+        if carry == "fresh":
+            for mid in member_ids:
+                member = self.db.get_member(mid)
+                if member and member["provider"] == "web":
+                    self.db.update_member(mid, {"web_conversation": "needs_new"})
+        self._pulse_stale(session_id)
+        self._cancel_web_members(member_ids, "group_changed")
+        self.publish_state(session_id)
+        return {"ok": True, "group": created, "carry": carry, "preview": plan}
+
+    def _cancel_web_members(self, member_ids: list[str], reason: str) -> None:
+        web = getattr(self, "web", None)
+        if web:
+            web.cancel_members(member_ids, reason)
 
     async def _independent(self, session_id: str, run_token: str, cancel: asyncio.Event, members: list[dict], version: int) -> str:
         session = self.db.get_session(session_id)
@@ -559,6 +865,8 @@ class RoomEngine:
         version: int,
         cap: int,
         transcript: list[dict],
+        group_id: str | None = None,
+        group_generation: int | None = None,
     ) -> str:
         if cancel.is_set():
             return "stopped"
@@ -571,7 +879,13 @@ class RoomEngine:
             return "limit_time"
         if self.db.has_preflight_block(session_id, run_token, member["id"]):
             return "skip"
+        if group_id:
+            current_group = self.db.get_group(group_id)
+            if not current_group or current_group["status"] != "active" or int(current_group["generation"]) != int(group_generation or 0):
+                return "version_changed"
         step_key = f"{run_token}:v{version}:r{round_no}:{phase}:{member['id']}"
+        if group_id:
+            step_key += f":{group_id}"
         if self.db.step_exists(step_key):
             return "skip"
         reply_to = None if phase in {"independent", "summary"} else self._pick_reply(member, transcript)
@@ -598,7 +912,18 @@ class RoomEngine:
             end_reason=session.get("end_reason") or "",
             is_demo=member["provider"] == "demo",
         )
-        request.prompt = render_prompt(request)
+        request.session_id = session_id
+        request.run_token = run_token
+        request.group_id = group_id or ""
+        request.context_version = version
+        request.group_generation = int(group_generation or 0)
+        request.web_site = member.get("web_site") or ""
+        request.web_origin = member.get("web_origin") or ""
+        request.web_tab_key = member.get("web_tab_key") or ""
+        request.web_model_label = member.get("web_model_label") or ""
+        request.web_auto = bool(member.get("web_auto"))
+        request.web_open_new = (member.get("web_conversation") or "") == "needs_new"
+        request.prompt = web_forward_text(request) if member.get("provider") == "web" else render_prompt(request)
         preflight = getattr(self.provider, "preflight", None)
         if preflight:
             error = preflight(request)
@@ -637,6 +962,7 @@ class RoomEngine:
                 "suggest_next_nickname": suggest_name,
                 "is_demo": member["provider"] == "demo",
                 "is_summary": phase == "summary",
+                "group_id": group_id,
             }
         )
         self.db.set_speaking(session_id, member["id"], True)
@@ -682,7 +1008,11 @@ class RoomEngine:
                 self.db.finish_step(step_key, "cancelled")
                 self.publish(session_id, "message", self.db.get_message(message["id"]))
                 return "stopped"
-            if stale.is_set() or self.db.get_session(session_id)["context_version"] != version:
+            group_moved = False
+            if group_id:
+                current_group = self.db.get_group(group_id)
+                group_moved = not current_group or int(current_group["generation"]) != int(group_generation or 0)
+            if stale.is_set() or self.db.get_session(session_id)["context_version"] != version or group_moved:
                 self.db.update_message(
                     message["id"],
                     content=text,
@@ -705,6 +1035,9 @@ class RoomEngine:
                 self.publish(session_id, "message", self.db.get_message(message["id"]))
                 return "error"
             new_point = infer_new_point(text)
+            shown_model = member["model_id"]
+            if member.get("provider") == "web":
+                shown_model = request.web_model_label or "未能核验精确 model ID"
             self.db.update_message(
                 message["id"],
                 content=text,
@@ -713,7 +1046,8 @@ class RoomEngine:
                 finished_at=now_iso(),
                 prompt_tokens=request.usage.prompt_tokens,
                 completion_tokens=request.usage.completion_tokens,
-                cost_usd=request.usage.cost_usd,
+                cost_usd=0 if member.get("provider") == "web" else request.usage.cost_usd,
+                model_id=shown_model,
                 is_demo=member["provider"] == "demo",
                 is_summary=phase == "summary",
             )
@@ -852,6 +1186,9 @@ class RoomEngine:
             return
         session = self.db.get_session(session_id)
         if not session:
+            return
+        if session.get("layout") == "branches":
+            self._system(session_id, "分支房间结束。没有把不同分支的答复合成一份跨组总结。")
             return
         target = self._summary_target(session)
         allowed, why = self._model_summary_allowed(session, reason, cancel, session_id)

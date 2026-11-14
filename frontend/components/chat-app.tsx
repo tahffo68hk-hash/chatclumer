@@ -11,7 +11,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { api, eventUrl } from "@/lib/api";
-import type { CatalogItem, ChatMessage, Member, Session } from "@/lib/types";
+import type { CatalogItem, ChatMessage, Member, RoomGroup, Session } from "@/lib/types";
 
 const MODES = [
   { id: "free_chat", label: "自由群聊" },
@@ -63,6 +63,10 @@ export function ChatApp() {
   const [session, setSession] = useState<Session | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [groups, setGroups] = useState<RoomGroup[]>([]);
+  const [picked, setPicked] = useState<string[]>([]);
+  const [preview, setPreview] = useState("");
+  const [audience, setAudience] = useState("all");
   const [catalog, setCatalog] = useState<CatalogItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -106,6 +110,7 @@ export function ChatApp() {
     const [detail, msgs] = await Promise.all([api.session(id), api.messages(id)]);
     setSession(detail.session);
     setMembers(detail.members);
+    setGroups(detail.groups || []);
     setMessages(msgs);
     setSettings({
       max_rounds: detail.session.max_rounds,
@@ -211,6 +216,14 @@ export function ChatApp() {
     setPane("chat");
   }
 
+  async function createBranches() {
+    setError("");
+    const created = await api.createSession({ title: "独立分支", template: "demo", mode: "free_chat", layout: "branches" });
+    await loadList();
+    setCurrentId(created.id);
+    setPane("chat");
+  }
+
   async function createBlank() {
     const created = await api.createSession({ title: "空白房间", template: null, mode: "free_chat" });
     await loadList();
@@ -223,7 +236,8 @@ export function ChatApp() {
     if (!currentId || !content.trim()) return;
     setError("");
     try {
-      await api.send(currentId, content.trim(), replyId, session?.mode);
+      const groupId = audience.startsWith("group:") ? audience.slice(6) : undefined;
+      await api.send(currentId, content.trim(), replyId, session?.mode, session?.layout === "branches" ? (groupId ? "group" : "all") : undefined, groupId);
       setReplyTo(null);
       stickRef.current = true;
     } catch (err) {
@@ -362,6 +376,9 @@ export function ChatApp() {
             <Button data-testid="create-demo" size="sm" onClick={createDemo}>
               演示群
             </Button>
+            <Button data-testid="create-branches" size="sm" variant="secondary" onClick={createBranches}>
+              独立分支
+            </Button>
             <Button size="sm" variant="secondary" onClick={createBlank}>
               空白群
             </Button>
@@ -446,6 +463,40 @@ export function ChatApp() {
                 <span data-testid="end-reason">结束原因：{session.end_reason_label}</span>
               )}
             </div>
+            {session?.layout === "branches" && (
+              <div data-testid="branch-bar" className="mt-3 space-y-2 rounded-lg border border-[#e4d8c8] bg-white p-3 text-sm">
+                <p>同一问题先各自分支。勾选至少两人后，先预览将共享的公开答复，再合并。未勾选的历史不会默认传走。发到网页的内容会离开这台电脑，网页不显示单价时费用记为未知。</p>
+                <div className="flex flex-wrap gap-2">
+                  {members.map((member) => (
+                    <label key={member.id} className="flex items-center gap-1 rounded-full border px-2 py-1">
+                      <input
+                        data-testid={`pick-${member.nickname}`}
+                        type="checkbox"
+                        checked={picked.includes(member.id)}
+                        onChange={(event) => {
+                          setPicked((current) => event.target.checked ? [...current, member.id] : current.filter((id) => id !== member.id));
+                        }}
+                      />
+                      {member.nickname}
+                      <span className="text-[11px] text-[#6b6258]">{groups.find((group) => group.status === "active" && group.member_ids.includes(member.id))?.name}</span>
+                    </label>
+                  ))}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" variant="outline" data-testid="preview-merge" onClick={() => void api.previewMerge(currentId || "", picked).then((plan) => setPreview(`${plan.note}\n${plan.shares.map((item) => `${item.nickname}：${item.excerpt}`).join("\n")}`)).catch((err) => setError(err.message))}>预览将共享的内容</Button>
+                  <Button size="sm" data-testid="confirm-merge" onClick={() => void api.merge(currentId || "", picked).then(() => { if (currentId) return loadRoom(currentId); }).catch((err) => setError(err.message))}>合并为讨论组</Button>
+                  <Button size="sm" variant="outline" data-testid="split-fresh" onClick={() => {
+                    const group = groups.find((item) => item.status === "active" && item.kind === "discussion" && picked.some((id) => item.member_ids.includes(id)));
+                    if (!currentId || !group) {
+                      setError("先选中讨论组里要拆出去的成员");
+                      return;
+                    }
+                    void api.split(currentId, group.id, picked.filter((id) => group.member_ids.includes(id)), "fresh").then(() => loadRoom(currentId)).catch((err) => setError(err.message));
+                  }}>拆成新分支</Button>
+                </div>
+                {preview && <p data-testid="merge-preview" className="whitespace-pre-wrap text-xs text-[#6b6258]">{preview}</p>}
+              </div>
+            )}
             {demoRoom && (
               <p data-testid="demo-banner" className="mt-2 rounded-lg bg-[#fff1df] px-3 py-2 text-sm text-[#9a3412]">
                 演示模式：带「非真实模型」标记的话是合成回复，不是 GPT、Claude、Gemini 或 Grok 的输出。
@@ -492,6 +543,9 @@ export function ChatApp() {
             busy={!!busy}
             disabled={!currentId}
             members={members}
+            groups={groups}
+            audience={audience}
+            onAudience={setAudience}
             reply={replyTo}
             onClearReply={() => setReplyTo(null)}
             onSend={send}
@@ -752,6 +806,9 @@ function Composer({
   busy,
   disabled,
   members,
+  groups,
+  audience,
+  onAudience,
   reply,
   onClearReply,
   onSend,
@@ -759,6 +816,9 @@ function Composer({
   busy: boolean;
   disabled: boolean;
   members: Member[];
+  groups: RoomGroup[];
+  audience: string;
+  onAudience: (value: string) => void;
   reply: ChatMessage | null;
   onClearReply: () => void;
   onSend: (content: string, replyId?: string) => Promise<void>;
@@ -809,6 +869,18 @@ function Composer({
               @{member.nickname}
             </Button>
           ))}
+        </div>
+      )}
+      {groups.some((group) => group.status === "active" && group.kind === "discussion") && (
+        <div className="mx-auto mb-2 flex max-w-3xl flex-wrap gap-2">
+          <label className="text-xs text-[#6b6258]">发给
+            <select data-testid="audience" className="ml-2 rounded border bg-white px-2 py-1" value={audience} onChange={(event) => onAudience(event.target.value)}>
+              <option value="all">全部分支</option>
+              {groups.filter((group) => group.status === "active").map((group) => (
+                <option key={group.id} value={`group:${group.id}`}>{group.name}</option>
+              ))}
+            </select>
+          </label>
         </div>
       )}
       <div className="mx-auto flex max-w-3xl items-end gap-2">
@@ -876,6 +948,7 @@ function MessageRow({ message, reply, onReply }: { message: ChatMessage; reply?:
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <span className="font-medium">{message.nickname || "房间"}</span>
+            {message.group_id && <Badge variant="outline">{message.event_kind === "merge" ? "合并" : message.event_kind === "split" ? "拆分" : "本组"}</Badge>}
             {message.role_name && <span className="text-xs text-[#6b6258]">{message.role_name}</span>}
             {message.is_demo && <Badge variant="outline">演示</Badge>}
             {message.is_summary && (

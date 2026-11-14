@@ -139,7 +139,83 @@ class Database:
             self.conn.execute("ALTER TABLE sessions ADD COLUMN summary_provider TEXT")
         if "summary_model_id" not in cols:
             self.conn.execute("ALTER TABLE sessions ADD COLUMN summary_model_id TEXT")
+        if "layout" not in cols:
+            self.conn.execute("ALTER TABLE sessions ADD COLUMN layout TEXT NOT NULL DEFAULT 'shared'")
+        self._ensure_column("members", "web_site", "TEXT")
+        self._ensure_column("members", "web_origin", "TEXT")
+        self._ensure_column("members", "web_tab_key", "TEXT")
+        self._ensure_column("members", "web_model_label", "TEXT")
+        self._ensure_column("members", "web_conversation", "TEXT")
+        self._ensure_column("members", "web_auto", "INTEGER NOT NULL DEFAULT 0")
+        self._ensure_column("messages", "group_id", "TEXT")
+        self._ensure_column("messages", "audience", "TEXT")
+        self._ensure_column("messages", "target_member_id", "TEXT")
+        self._ensure_column("messages", "event_kind", "TEXT")
+        self._ensure_column("messages", "source_message_id", "TEXT")
+        self._ensure_column("messages", "source_group_id", "TEXT")
+        self.conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS groups (
+              id TEXT PRIMARY KEY,
+              session_id TEXT NOT NULL,
+              name TEXT NOT NULL,
+              kind TEXT NOT NULL,
+              status TEXT NOT NULL,
+              generation INTEGER NOT NULL DEFAULT 0,
+              settled INTEGER NOT NULL DEFAULT 0,
+              created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS group_members (
+              id TEXT PRIMARY KEY,
+              group_id TEXT NOT NULL,
+              session_id TEXT NOT NULL,
+              member_id TEXT NOT NULL,
+              active INTEGER NOT NULL,
+              joined_at TEXT NOT NULL,
+              left_at TEXT
+            );
+            CREATE TABLE IF NOT EXISTS ext_codes (
+              code_hash TEXT PRIMARY KEY,
+              expires_at TEXT NOT NULL,
+              used INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS ext_tokens (
+              token_hash TEXT PRIMARY KEY,
+              created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS ext_jobs (
+              id TEXT PRIMARY KEY,
+              request_id TEXT NOT NULL UNIQUE,
+              session_id TEXT NOT NULL,
+              run_token TEXT,
+              group_id TEXT,
+              member_id TEXT NOT NULL,
+              context_version INTEGER NOT NULL,
+              group_generation INTEGER NOT NULL,
+              origin TEXT NOT NULL,
+              site TEXT NOT NULL,
+              tab_key TEXT NOT NULL,
+              prompt TEXT NOT NULL,
+              status TEXT NOT NULL,
+              result_text TEXT,
+              model_label TEXT,
+              error TEXT,
+              created_at TEXT NOT NULL,
+              finished_at TEXT
+            );
+            CREATE TABLE IF NOT EXISTS site_blocks (
+              site TEXT PRIMARY KEY,
+              reason TEXT NOT NULL,
+              created_at TEXT NOT NULL
+            );
+            """
+        )
         self.conn.commit()
+
+    def _ensure_column(self, table: str, column: str, decl: str) -> None:
+        cols = {row[1] for row in self.conn.execute(f"PRAGMA table_info({table})")}
+        if column not in cols:
+            self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
 
     def _one(self, sql: str, params: tuple = ()) -> dict | None:
         row = self.conn.execute(sql, params).fetchone()
@@ -154,12 +230,14 @@ class Database:
         row["speaking_member_ids"] = json.loads(row.pop("speaking_json") or "[]")
         row["stop_on_no_new_point"] = bool(row["stop_on_no_new_point"])
         row["run_cost_known"] = bool(row["run_cost_known"])
+        row["layout"] = row.get("layout") or "shared"
         return row
 
     def _hydrate_member(self, row: dict | None) -> dict | None:
         if not row:
             return None
         row["enabled"] = bool(row["enabled"])
+        row["web_auto"] = bool(row.get("web_auto"))
         return row
 
     def create_session(self, **fields: Any) -> dict:
@@ -194,6 +272,10 @@ class Database:
                     ts,
                 ),
             )
+            layout = fields.get("layout") or "shared"
+            if layout not in {"shared", "branches"}:
+                layout = "shared"
+            self.conn.execute("UPDATE sessions SET layout=? WHERE id=?", (layout, sid))
             self.conn.commit()
             return self.get_session(sid)
 
@@ -255,6 +337,8 @@ class Database:
     def delete_session(self, sid: str) -> None:
         with self._lock:
             self.conn.execute("DELETE FROM messages WHERE session_id=?", (sid,))
+            self.conn.execute("DELETE FROM group_members WHERE session_id=?", (sid,))
+            self.conn.execute("DELETE FROM groups WHERE session_id=?", (sid,))
             self.conn.execute("DELETE FROM members WHERE session_id=?", (sid,))
             self.conn.execute("DELETE FROM steps WHERE session_id=?", (sid,))
             self.conn.execute("DELETE FROM runs WHERE session_id=?", (sid,))
@@ -472,6 +556,9 @@ class Database:
                 ),
             )
             self.conn.execute("UPDATE sessions SET updated_at=? WHERE id=?", (now_iso(), fields["session_id"]))
+            session = self._one("SELECT layout FROM sessions WHERE id=?", (fields["session_id"],))
+            if session and (session.get("layout") or "shared") == "branches":
+                self._ensure_branch(fields["session_id"], mid, fields["nickname"])
             self.conn.commit()
             return self.get_member(mid)
 
@@ -506,6 +593,12 @@ class Database:
             "api_key_env",
             "enabled",
             "avatar_color",
+            "web_site",
+            "web_origin",
+            "web_tab_key",
+            "web_model_label",
+            "web_conversation",
+            "web_auto",
         }
         with self._lock:
             sets = []
@@ -513,7 +606,7 @@ class Database:
             for key, value in fields.items():
                 if key not in allowed:
                     continue
-                if key == "enabled":
+                if key in {"enabled", "web_auto"}:
                     value = 1 if value else 0
                 sets.append(f"{key}=?")
                 params.append(value)
@@ -551,8 +644,9 @@ class Database:
                   avatar_color, content, status, reply_to_id, round_number, phase, context_version,
                   run_token, step_key, suggest_next_id, suggest_next_nickname, prompt_tokens,
                   completion_tokens, cost_usd, has_new_point, is_demo, is_summary, discarded_reason,
+                  group_id, audience, target_member_id, event_kind, source_message_id, source_group_id,
                   created_at, finished_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     mid,
@@ -581,6 +675,12 @@ class Database:
                     1 if fields.get("is_demo") else 0,
                     1 if fields.get("is_summary") else 0,
                     fields.get("discarded_reason"),
+                    fields.get("group_id"),
+                    fields.get("audience"),
+                    fields.get("target_member_id"),
+                    fields.get("event_kind"),
+                    fields.get("source_message_id"),
+                    fields.get("source_group_id"),
                     ts,
                     fields.get("finished_at"),
                 ),
@@ -721,3 +821,176 @@ class Database:
         with self._lock:
             self.conn.execute("UPDATE steps SET status=? WHERE step_key=?", (status, step_key))
             self.conn.commit()
+
+    def _ensure_branch(self, session_id: str, member_id: str, nickname: str) -> str:
+        row = self._one(
+            """
+            SELECT g.id FROM groups g
+            JOIN group_members gm ON gm.group_id=g.id
+            WHERE gm.member_id=? AND gm.active=1 AND g.status='active'
+            """,
+            (member_id,),
+        )
+        if row:
+            return row["id"]
+        gid = new_id()
+        now = now_iso()
+        self.conn.execute(
+            """
+            INSERT INTO groups (id, session_id, name, kind, status, generation, settled, created_at)
+            VALUES (?, ?, ?, 'branch', 'active', 0, 0, ?)
+            """,
+            (gid, session_id, f"{nickname} 的独立分支", now),
+        )
+        self.conn.execute(
+            """
+            INSERT INTO group_members (id, group_id, session_id, member_id, active, joined_at)
+            VALUES (?, ?, ?, ?, 1, ?)
+            """,
+            (new_id(), gid, session_id, member_id, now),
+        )
+        return gid
+
+    def list_groups(self, sid: str) -> list[dict]:
+        with self._lock:
+            groups = self._all(
+                "SELECT * FROM groups WHERE session_id=? ORDER BY created_at, rowid",
+                (sid,),
+            )
+            for group in groups:
+                members = self._all(
+                    """
+                    SELECT member_id FROM group_members
+                    WHERE group_id=? AND active=1 ORDER BY joined_at, rowid
+                    """,
+                    (group["id"],),
+                )
+                group["member_ids"] = [item["member_id"] for item in members]
+                group["settled"] = bool(group.get("settled"))
+            return groups
+
+    def get_group(self, gid: str) -> dict | None:
+        with self._lock:
+            group = self._one("SELECT * FROM groups WHERE id=?", (gid,))
+            if not group:
+                return None
+            members = self._all(
+                "SELECT member_id FROM group_members WHERE group_id=? AND active=1 ORDER BY joined_at",
+                (gid,),
+            )
+            group["member_ids"] = [item["member_id"] for item in members]
+            group["settled"] = bool(group.get("settled"))
+            return group
+
+    def active_group_id(self, member_id: str) -> str | None:
+        with self._lock:
+            row = self._one(
+                """
+                SELECT g.id FROM groups g
+                JOIN group_members gm ON gm.group_id=g.id
+                WHERE gm.member_id=? AND gm.active=1 AND g.status='active'
+                """,
+                (member_id,),
+            )
+            return row["id"] if row else None
+
+    def set_groups_settled(self, group_ids: list[str], settled: bool) -> None:
+        with self._lock:
+            for gid in group_ids:
+                self.conn.execute("UPDATE groups SET settled=? WHERE id=?", (1 if settled else 0, gid))
+            self.conn.commit()
+
+    def bump_groups(self, group_ids: list[str]) -> None:
+        with self._lock:
+            for gid in group_ids:
+                self.conn.execute(
+                    "UPDATE groups SET generation=generation+1, settled=0 WHERE id=?",
+                    (gid,),
+                )
+            self.conn.commit()
+
+    def set_group_status(self, gid: str, status: str) -> None:
+        with self._lock:
+            self.conn.execute(
+                "UPDATE groups SET status=?, generation=generation+1, settled=0 WHERE id=?",
+                (status, gid),
+            )
+            self.conn.commit()
+
+    def move_members(
+        self,
+        session_id: str,
+        member_ids: list[str],
+        *,
+        kind: str,
+        name: str,
+        event_kind: str,
+        event_text: str,
+        context_version: int,
+        run_token: str | None,
+    ) -> dict:
+        with self._lock:
+            now = now_iso()
+            touched: list[str] = []
+            for member_id in member_ids:
+                rows = self._all(
+                    """
+                    SELECT group_id FROM group_members
+                    WHERE member_id=? AND active=1
+                    """,
+                    (member_id,),
+                )
+                for row in rows:
+                    touched.append(row["group_id"])
+                    self.conn.execute(
+                        "UPDATE group_members SET active=0, left_at=? WHERE group_id=? AND member_id=? AND active=1",
+                        (now, row["group_id"], member_id),
+                    )
+            for gid in set(touched):
+                left = self._one(
+                    "SELECT COUNT(*) AS n FROM group_members WHERE group_id=? AND active=1",
+                    (gid,),
+                )
+                if int(left["n"]) == 0:
+                    self.conn.execute(
+                        "UPDATE groups SET status='closed', generation=generation+1, settled=0 WHERE id=? AND status='active'",
+                        (gid,),
+                    )
+                else:
+                    self.conn.execute(
+                        "UPDATE groups SET generation=generation+1, settled=0 WHERE id=?",
+                        (gid,),
+                    )
+            gid = new_id()
+            self.conn.execute(
+                """
+                INSERT INTO groups (id, session_id, name, kind, status, generation, settled, created_at)
+                VALUES (?, ?, ?, ?, 'active', 1, 0, ?)
+                """,
+                (gid, session_id, name, kind, now),
+            )
+            for member_id in member_ids:
+                self.conn.execute(
+                    """
+                    INSERT INTO group_members (id, group_id, session_id, member_id, active, joined_at)
+                    VALUES (?, ?, ?, ?, 1, ?)
+                    """,
+                    (new_id(), gid, session_id, member_id, now),
+                )
+            self.conn.commit()
+        self.add_message(
+            {
+                "session_id": session_id,
+                "author_type": "system",
+                "nickname": "房间",
+                "content": event_text,
+                "status": "complete",
+                "phase": "meta",
+                "context_version": context_version,
+                "run_token": run_token,
+                "group_id": gid,
+                "event_kind": event_kind,
+                "finished_at": now_iso(),
+            }
+        )
+        return self.get_group(gid)

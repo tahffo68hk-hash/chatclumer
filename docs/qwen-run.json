@@ -1,0 +1,16 @@
+{
+  "date": "2026-11-14",
+  "url": "https://chat.qwen.ai/",
+  "through": "manual_dom_not_extension",
+  "guest": true,
+  "displayed_model": "",
+  "actions": [
+    "看到输入框，未点击登录或升级",
+    "点击了按钮：Send",
+    "等待 8 秒后读取页面，没有第二次发送"
+  ],
+  "result": "ui_submitted_reply_unconfirmed",
+  "http_status": 200,
+  "landed_url": "https://chat.qwen.ai/",
+  "after_text": "Qwen3.7-Plus\nLog in\nSign up\nHow can I help you?\nAuto\nBy using Qwen, you agree to our Terms of Service and Privacy Policy.\nConfirm your age to continue\nWhat year were you born?\n2000\nContinue"
+}

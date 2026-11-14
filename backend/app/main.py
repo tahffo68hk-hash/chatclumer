@@ -9,19 +9,56 @@ import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from .db import Database
 from .engine import RoomEngine
 from .providers import CATALOG, RoutedProvider
 from .secrets import ALLOWED_SECRET_NAMES, SecretStore
+from .groups import share_plan
 from .util import reason_label, redact, status_label
+from .webbridge import SITE_STATUS, SITES, WebBridge, origin_of, site_for_origin
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"
+FIXTURE_HTML = """<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>本地网页夹具</title></head>
+<body>
+<p id="model-name">Fixture 本地</p>
+<div id="thread"></div>
+<textarea id="composer" placeholder="写一句"></textarea>
+<button id="send" type="button">发送</button>
+<script>
+const thread = document.getElementById("thread");
+document.getElementById("send").addEventListener("click", () => {
+  const text = document.getElementById("composer").value.trim();
+  if (!text) return;
+  document.getElementById("composer").value = "";
+  const user = document.createElement("div");
+  user.dataset.role = "user";
+  user.textContent = text;
+  thread.appendChild(user);
+  const bot = document.createElement("div");
+  bot.dataset.role = "assistant";
+  bot.dataset.state = "streaming";
+  bot.textContent = "";
+  thread.appendChild(bot);
+  const reply = "夹具收到：" + text;
+  let i = 0;
+  const timer = setInterval(() => {
+    i += 4;
+    bot.textContent = reply.slice(0, i);
+    if (i >= reply.length) {
+      clearInterval(timer);
+      bot.dataset.state = "complete";
+    }
+  }, 30);
+});
+</script>
+</body></html>"""
 DEMO_MODEL = re.compile(r"^demo-[a-z0-9][a-z0-9._-]{0,80}$")
 PROVIDERS = {
     "demo",
@@ -34,6 +71,7 @@ PROVIDERS = {
     "qwen",
     "openai_compatible",
     "xai",
+    "web",
 }
 MODES = {"independent", "free_chat", "debate", "summary"}
 
@@ -78,6 +116,7 @@ class SessionIn(BaseModel):
     cross_delay_ms: int = 120
     room_rule: str = ""
     stop_on_no_new_point: bool = True
+    layout: str = "shared"
 
 
 class SettingsIn(BaseModel):
@@ -114,6 +153,41 @@ class MessageIn(BaseModel):
     content: str
     reply_to_id: str | None = None
     mode: str | None = None
+    audience: str | None = None
+    group_id: str | None = None
+    target_member_id: str | None = None
+
+
+class GroupIn(BaseModel):
+    member_ids: list[str] = Field(default_factory=list)
+    message_ids: list[str] | None = None
+    carry: str = "fresh"
+
+
+class BindIn(BaseModel):
+    web_site: str
+    web_origin: str
+    web_tab_key: str
+    web_model_label: str = ""
+    web_conversation: str = ""
+    web_auto: bool = False
+
+
+class PairIn(BaseModel):
+    code: str
+
+
+class JobResultIn(BaseModel):
+    request_id: str
+    run_id: str | None = None
+    group_id: str | None = None
+    member_id: str
+    context_version: int
+    text: str = ""
+    model_label: str = ""
+    status: str
+    page_url: str
+    detail: str = ""
 
 
 class RunIn(BaseModel):
@@ -137,6 +211,8 @@ class SimulateIn(BaseModel):
 def _check_limits(data: dict) -> None:
     if "mode" in data and data["mode"] is not None and data["mode"] not in MODES:
         raise HTTPException(400, "不支持的讨论模式")
+    if data.get("layout") not in {None, "shared", "branches"}:
+        raise HTTPException(400, "布局只能是共享时间线或独立分支")
     if "max_rounds" in data and data["max_rounds"] is not None and not 1 <= int(data["max_rounds"]) <= 8:
         raise HTTPException(400, "轮数上限需在 1 到 8 之间")
     if "max_ai_messages" in data and data["max_ai_messages"] is not None and not 1 <= int(data["max_ai_messages"]) <= 30:
@@ -173,6 +249,9 @@ def _check_member(data: dict) -> None:
     if provider == "demo":
         if not DEMO_MODEL.match(model_id):
             raise HTTPException(400, "演示成员的模型 ID 必须以 demo- 开头，不能写成真实模型")
+    elif provider == "web":
+        if model_id not in {f"web:{site}" for site in SITES}:
+            raise HTTPException(400, "网页成员要写成 web:站点，不能猜测底层模型 ID")
     else:
         if not model_id or model_id.startswith("demo-"):
             raise HTTPException(400, "需要精确模型 ID，不能用 demo- 前缀伪装")
@@ -216,7 +295,12 @@ def integration_status(secrets: SecretStore) -> dict:
 def create_app(db_path: str | None = None, secrets_path: str | None = None, provider=None) -> FastAPI:
     database = Database(db_path or str(DATA / "chat.db"))
     secret_store = SecretStore(secrets_path or str(DATA / "secrets.json"))
-    room = RoomEngine(database, provider or RoutedProvider(secret_store))
+    routed = provider or RoutedProvider(secret_store)
+    room = RoomEngine(database, routed)
+    bridge = WebBridge(database)
+    room.web = bridge
+    if hasattr(routed, "web"):
+        routed.web = bridge
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -238,6 +322,107 @@ def create_app(db_path: str | None = None, secrets_path: str | None = None, prov
     @app.get("/api/health")
     def health():
         return {"ok": True, "service": "multi-llm-chat-room"}
+
+    @app.get("/fixture/chat", response_class=HTMLResponse)
+    def fixture_chat():
+        return FIXTURE_HTML
+
+    @app.get("/api/ext/sites")
+    def ext_sites():
+        return {"sites": SITE_STATUS}
+
+    @app.post("/api/ext/code")
+    def ext_code():
+        return bridge.issue_code()
+
+    @app.post("/api/ext/pair")
+    def ext_pair(body: PairIn):
+        token = bridge.pair(body.code)
+        if not token:
+            raise HTTPException(401, "配对码无效或已用过")
+        return {"token": token}
+
+    def _require_ext(authorization: str | None) -> None:
+        if not bridge.authorized(authorization):
+            raise HTTPException(401, "配对无效")
+
+    @app.get("/api/ext/jobs")
+    def ext_jobs(authorization: str | None = Header(None)):
+        _require_ext(authorization)
+        return {"jobs": bridge.claim_jobs()}
+
+    @app.post("/api/ext/jobs/result")
+    def ext_result(body: JobResultIn, authorization: str | None = Header(None)):
+        _require_ext(authorization)
+        return bridge.finish_job(body.model_dump())
+
+    @app.post("/api/sessions/{session_id}/groups/preview")
+    def preview_group(session_id: str, body: GroupIn):
+        if not database.get_session(session_id):
+            raise HTTPException(404, "找不到房间")
+        if len(set(body.member_ids)) < 2:
+            raise HTTPException(400, "至少选择两个分支")
+        try:
+            return share_plan(database, session_id, body.member_ids, body.message_ids)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @app.post("/api/sessions/{session_id}/groups/merge")
+    async def merge_group(session_id: str, body: GroupIn):
+        if not database.get_session(session_id):
+            raise HTTPException(404, "找不到房间")
+        result = await room.merge_groups(session_id, body.member_ids, body.message_ids)
+        if not result.get("ok"):
+            raise HTTPException(400, result.get("error") or "无法合并")
+        session = database.get_session(session_id)
+        if session and session["status"] not in {"running", "paused", "stopped"}:
+            await room.start(session_id)
+        return result
+
+    @app.post("/api/sessions/{session_id}/groups/{group_id}/split")
+    async def split_group(session_id: str, group_id: str, body: GroupIn):
+        result = await room.split_group(session_id, group_id, body.member_ids, body.carry, body.message_ids)
+        if not result.get("ok"):
+            raise HTTPException(400, result.get("error") or "无法拆分")
+        return result
+
+    @app.post("/api/sessions/{session_id}/groups/{group_id}/stop")
+    async def stop_group(session_id: str, group_id: str):
+        group = database.get_group(group_id)
+        if not group or group["session_id"] != session_id:
+            raise HTTPException(404, "找不到小组")
+        database.set_group_status(group_id, "stopped")
+        database.bump_context(session_id)
+        bridge.cancel_members(group["member_ids"], "group_stop")
+        room._pulse_stale(session_id)
+        room.publish_state(session_id)
+        return {"ok": True, "group": database.get_group(group_id)}
+
+    @app.post("/api/members/{member_id}/web-bind")
+    def bind_web(member_id: str, body: BindIn):
+        member = database.get_member(member_id)
+        if not member:
+            raise HTTPException(404, "找不到成员")
+        origin = origin_of(body.web_origin if "://" in body.web_origin else "")
+        if site_for_origin(origin) != body.web_site:
+            raise HTTPException(400, "来源和站点不一致，拒绝绑定")
+        if not body.web_tab_key.strip() or len(body.web_tab_key) > 80:
+            raise HTTPException(400, "需要这个标签页自己的绑定键")
+        label = (body.web_model_label or "").strip() or "未能核验精确 model ID"
+        updated = database.update_member(
+            member_id,
+            {
+                "provider": "web",
+                "model_id": f"web:{body.web_site}",
+                "web_site": body.web_site,
+                "web_origin": origin,
+                "web_tab_key": body.web_tab_key.strip(),
+                "web_model_label": label,
+                "web_conversation": (body.web_conversation or "bound")[:80],
+                "web_auto": body.web_auto,
+            },
+        )
+        return updated
 
     @app.get("/api/catalog")
     def catalog():
@@ -325,7 +510,12 @@ def create_app(db_path: str | None = None, secrets_path: str | None = None, prov
         session = database.get_session(session_id)
         if not session:
             raise HTTPException(404, "找不到房间")
-        return {"session": present_session(database, session), "members": database.list_members(session_id)}
+        return {
+            "session": present_session(database, session),
+            "members": database.list_members(session_id),
+            "groups": database.list_groups(session_id),
+            "sites": SITE_STATUS,
+        }
 
     @app.patch("/api/sessions/{session_id}")
     def patch_session(session_id: str, body: SettingsIn):
@@ -408,7 +598,15 @@ def create_app(db_path: str | None = None, secrets_path: str | None = None, prov
             raise HTTPException(404, "找不到房间")
         if body.mode and body.mode not in MODES:
             raise HTTPException(400, "不支持的讨论模式")
-        result = await room.ingest_message(session_id, body.content, body.reply_to_id, body.mode)
+        result = await room.ingest_message(
+            session_id,
+            body.content,
+            body.reply_to_id,
+            body.mode,
+            audience=body.audience,
+            group_id=body.group_id,
+            target_member_id=body.target_member_id,
+        )
         if not result.get("ok"):
             raise HTTPException(400, result.get("error") or "无法发送")
         return result

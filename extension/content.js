@@ -1,0 +1,174 @@
+const DANGER = /升级|订阅|付费|支付|购买|删除|清空|注销|delete|upgrade|subscribe|remove|buy/i;
+
+function labelOf(el) {
+  return `${el.getAttribute("aria-label") || ""} ${el.innerText || ""}`.trim();
+}
+
+function dangerous(el) {
+  return DANGER.test(labelOf(el));
+}
+
+function siteFrom(url) {
+  if (url.startsWith("http://127.0.0.1:43124/fixture")) return "fixture";
+  if (url.startsWith("https://gemini.google.com/")) return "gemini";
+  return "";
+}
+
+const adapters = {
+  fixture: {
+    composer: () => document.querySelector("#composer"),
+    send: () => document.querySelector("#send"),
+    assistants: () => [...document.querySelectorAll("#thread [data-role='assistant']")],
+    text: (node) => (node.textContent || "").trim(),
+    done: (node) => node.getAttribute("data-state") === "complete",
+    model: () => (document.querySelector("#model-name")?.textContent || "").trim(),
+    openNew: () => null,
+  },
+  gemini: {
+    composer: () => document.querySelector("[aria-label='Enter a prompt for Gemini']")
+      || document.querySelector("rich-textarea [contenteditable='true']"),
+    send: () => [...document.querySelectorAll("button")].find((el) => {
+      const label = el.getAttribute("aria-label") || "";
+      return ["Send message", "Send", "发送", "发送消息"].includes(label) && !dangerous(el) && !el.disabled;
+    }),
+    assistants: () => [...document.querySelectorAll("model-response")],
+    text: (node) => (node.innerText || "").replace(/^Gemini said\s*/i, "").trim(),
+    done: (node) => {
+      const stop = [...document.querySelectorAll("button")].some((el) => /^(Stop|停止)/i.test(el.getAttribute("aria-label") || ""));
+      return !stop && !!(node && (node.innerText || "").trim());
+    },
+    model: () => {
+      const button = [...document.querySelectorAll("button")].find((el) => (el.getAttribute("aria-label") || "").startsWith("Open mode picker"));
+      return button ? button.innerText.trim() : "";
+    },
+    openNew: () => {
+      const el = document.querySelector("[data-test-id='reset-button']");
+      if (!el || dangerous(el)) return null;
+      const text = (el.innerText || "").trim();
+      return text === "New chat" || text === "新对话" ? el : null;
+    },
+  },
+};
+
+const sent = new Set(JSON.parse(sessionStorage.getItem("bridge-sent") || "[]"));
+let busy = false;
+
+function remember(id) {
+  sent.add(id);
+  sessionStorage.setItem("bridge-sent", JSON.stringify([...sent].slice(-40)));
+}
+
+function snapshot(adapter) {
+  return adapter.assistants().map((node, index) => `${index}:${adapter.text(node)}`);
+}
+
+async function waitNew(adapter, before, signal) {
+  let last = "";
+  let stable = 0;
+  for (let i = 0; i < 80; i += 1) {
+    if (signal.cancelled) return { status: "cancelled" };
+    const nodes = adapter.assistants();
+    const fresh = nodes.filter((_, index) => snapshot(adapter)[index] !== before[index] || index >= before.length);
+    const node = fresh[fresh.length - 1];
+    if (node && adapter.done(node)) {
+      const text = adapter.text(node);
+      if (text && text === last) stable += 1;
+      else stable = 0;
+      last = text;
+      if (stable >= 2 && text) return { status: "complete", text };
+    }
+    const body = document.body ? document.body.innerText : "";
+    if (/rate limit|too many requests|you've reached your|配额已用完|次数已用完|usage limit/i.test(body) && !node) {
+      return { status: "rate_limit", detail: "页面出现限流提示，已停止" };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 400));
+  }
+  return { status: "error", detail: "没有等到新的助手回复" };
+}
+
+function fillComposer(box, prompt) {
+  const field = box.matches?.("[contenteditable='true']")
+    ? box
+    : box.querySelector?.("[contenteditable='true']") || box;
+  field.focus();
+  if ("value" in field && !field.isContentEditable) {
+    field.value = prompt;
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+    return;
+  }
+  const selection = window.getSelection();
+  const range = document.createRange();
+  range.selectNodeContents(field);
+  selection.removeAllRanges();
+  selection.addRange(range);
+  document.execCommand("insertText", false, prompt);
+  field.dispatchEvent(new InputEvent("input", { bubbles: true, data: prompt, inputType: "insertText" }));
+}
+
+async function runJob(job) {
+  const pageUrl = location.origin + location.pathname;
+  if (/accounts\.google\.com|challenge|just a moment/i.test(location.href)) {
+    return { status: "login", detail: "页面停在登录或验证，已停止", page_url: pageUrl };
+  }
+  const site = siteFrom(location.href);
+  const adapter = adapters[site];
+  if (!adapter || site !== job.site) return { status: "error", detail: "当前页和任务站点不一致", page_url: pageUrl };
+  if (sent.has(job.request_id)) return { status: "error", detail: "这个请求已经提交过，刷新后不会再点发送", page_url: pageUrl };
+  if (job.action === "cancel") return { status: "cancelled", page_url: pageUrl };
+  if (busy) return { status: "error", detail: "这个标签页正在处理上一条", page_url: pageUrl };
+  busy = true;
+  const signal = { cancelled: false };
+  const onCancel = (message) => {
+    if (message && message.type === "cancel" && message.request_id === job.request_id) signal.cancelled = true;
+  };
+  chrome.runtime.onMessage.addListener(onCancel);
+  try {
+    if (job.open_new) {
+      const opener = adapter.openNew();
+      if (!opener) return { status: "error", detail: "站点没有可确认的新对话按钮，已阻塞，不会沿用旧会话假装失忆", page_url: pageUrl };
+      opener.click();
+      await new Promise((resolve) => setTimeout(resolve, 600));
+    }
+    const before = snapshot(adapter);
+    const box = adapter.composer();
+    if (!box) return { status: "error", detail: "找不到输入框", page_url: pageUrl };
+    if (signal.cancelled || job.action === "cancel") return { status: "cancelled", page_url: pageUrl };
+    fillComposer(box, job.prompt);
+    let send = null;
+    for (let i = 0; i < 10; i += 1) {
+      send = adapter.send();
+      if (send && !dangerous(send)) break;
+      send = null;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    if (!send) return { status: "error", detail: "找不到安全的发送按钮", page_url: pageUrl };
+    if (signal.cancelled) return { status: "cancelled", page_url: pageUrl };
+    remember(job.request_id);
+    send.click();
+    const result = await waitNew(adapter, before, signal);
+    result.model_label = adapter.model() || "未能核验精确 model ID";
+    result.page_url = pageUrl;
+    return result;
+  } finally {
+    chrome.runtime.onMessage.removeListener(onCancel);
+    busy = false;
+  }
+}
+
+let pending = null;
+
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (!message || message.type !== "run") return;
+  if (busy) {
+    if (pending) pending.sendResponse({ status: "error", detail: "这个标签页只保留下一条，更早的排队已取消", page_url: location.origin + location.pathname });
+    pending = { job: message.job, sendResponse };
+    return true;
+  }
+  runJob(message.job).then((result) => {
+    sendResponse(result);
+    const next = pending;
+    pending = null;
+    if (next) runJob(next.job).then(next.sendResponse);
+  });
+  return true;
+});

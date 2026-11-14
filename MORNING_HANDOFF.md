@@ -70,6 +70,7 @@ bash scripts/start.sh
 - 自由群聊不是固定全员轮询：首轮在没有 token/费用上限时并发独立回答；之后每轮通常只点一位（提及 +100、上一位建议 +40、刚说过的人 -35）。提示词带已公开记录。演示模板在被点到时总会写一段话，不会自己弃权。真实模型可以写出「没有新的观点」，之后调度可以不再点他。调度在发请求之前决定本轮谁不开口，模型不能零请求弃权。
 - 没有单价的 OpenRouter 模型（不是明确的 `:free` 结尾）直接拒绝，不会按 0 美元放行，也不会去掉后缀改走收费模型。`:free` 请求关闭 OpenRouter fallback。这次没有真实调用。
 - QQ / 微信仍是 `BLOCKED_EXTERNAL`。本轮没有做 P1。
+- 分组和网页桥已经接到房间里。独立分支、合并预览、拆分可以在页面上操作。网页成员只有绑定了明确标签、打开受控自动发送、并且房间没有费用上限时才会发送。Gemini 的游客回路通过了；Qwen 停在年龄确认；ChatGPT、Claude、DeepSeek 是 BLOCKED；Grok 是登录墙。详见 `docs/WEB_ACCESS.md`。不要把夹具或被挡住的站点说成已经接通。
 
 ## 哪些能用
 
@@ -81,6 +82,12 @@ bash scripts/start.sh
 | `:free` OpenRouter | 需要 `OPENROUTER_API_KEY`，模型 ID 必须以 `:free` 结尾 |
 | Ollama | 只连接已有服务，不下载模型 |
 | QQ / 个人微信 | 未接通 |
+| 独立分支、合并预览、拆分 | 页面可用。演示回复仍标明非真实模型 |
+| 本地夹具网页成员 | 扩展 → 本机桥 → 房间已跑通。夹具不是真实模型 |
+| Gemini 游客网页 | 2026-11-14 扩展回路通过，页面显示 Flash-Lite。不保证额度 |
+| Qwen 网页 | 停在年龄确认，没有读到回复 |
+| ChatGPT / Claude / DeepSeek 网页 | BLOCKED，没有绕过 |
+| Grok 网页 | 登录墙，没有当成游客 |
 
 ## 三分钟试用
 
@@ -90,11 +97,32 @@ bash scripts/start.sh
 4. 运行中点「停止」。状态应变成「已停止」，结束原因是「用户停止」，而不是轮数上限。
 5. 默认总结徽章是「本地回顾」。刷新后不会自己重开。
 
+## 分组与网页验收
+
+2026-11-14 在这台机器上做的，清单如下。
+
+- 旧的 21 个测试仍在。分组和扩展协议加上之后，`cd backend && .venv/bin/pytest -q` 是 26 passed。
+- 浏览器：`backend/.venv/bin/python scripts/check_branch_ui.py` 通过。预览里有勾选的两人，没有未勾选的第三人；合并后能选择发给哪一组；拆分后刷新，状态不是进行中。
+- 扩展：品牌版 Chrome 157 不接受 `--load-extension`。Chrome for Testing 加载 `extension/` 后，`scripts/check_web_bridge.py` 的夹具和 Gemini 都是 passed。夹具第二次提交含「公开答复」，停止后仍是 2 条用户气泡，房间里有 2 条完成回复，模型名是「Fixture 本地」。
+- Gemini：https://gemini.google.com/app ，游客，页面显示 Flash-Lite。扩展先发送「请用中文给两条简短读书建议，每条一句话。」，房间记下两条建议；合并后再把选中的公开答复发进同一个页面，房间记下第二条回复；停止后 4 秒内没有新的助手消息。没有点登录、订阅或模式切换。
+- 更早一次 Gemini 转发被测试脚本提前停止，房间把那条标成 cancelled，页面上也没有形成可用回复。上面这条 passed 是修正等待之后重跑的，不是绕过限制。
+- Qwen：https://chat.qwen.ai/ 手动点了一次 Send，随后出现确认年龄。没有填出生年，没有点 Continue，没有读到回复。这一条不是扩展端到端。
+- ChatGPT、Claude、DeepSeek、Grok 沿用早前结果，本轮没有重试，也没有换入口。
+
+截图：
+
+- [分支预览](docs/screenshots/branches-preview.png)
+- [分支桌面](docs/screenshots/branches-desktop.png)
+- [分支窄屏](docs/screenshots/branches-mobile.png)
+- [夹具扩展回路](docs/screenshots/fixture-bridge.png)
+- [Gemini 扩展回路](docs/screenshots/gemini-bridge.png)
+- [Qwen 停在年龄确认](docs/screenshots/qwen-manual.png)
+
 ## 实际测试
 
 北京时间 2026-11-15 00:41 CST 前后，在本机执行。
 
-- `cd backend && .venv/bin/pytest -q` → `21 passed in 2.72s`
+- `cd backend && .venv/bin/pytest -q` → 当时 `21 passed`。分组完成后重跑是 `26 passed`。
 - `cd frontend && npx tsc --noEmit` 通过
 - `cd frontend && npm run build` 通过（Next.js 15.5.29）
 - 浏览器回归：演示房间能看到「指定总结模型」选项；发送后正文含「非真实模型」；结束后状态「已停止」，并出现「本地回顾」
@@ -159,11 +187,13 @@ git status --short
 
 ## 当前提交
 
-生命周期修复在：
+分组和网页桥提交后，用下面的命令核对。若其后只有记下哈希的修订，以 `git rev-parse HEAD` 为准，并确认功能提交仍是祖先。
 
-`7fd2e7f679d08a5684df0089c53a645196c901f9`
+功能提交会写在下一行；打包时若本文件还写着占位，以 git 为准：
 
-若其后只有记下这个哈希的修订，包和 bundle 对应的是 `git rev-parse HEAD`。核对：
+`HEAD_AFTER_COMMIT`
+
+核对：
 
 ```bash
 git rev-parse HEAD

@@ -14,7 +14,7 @@ import httpx
 
 from .secrets import SecretStore
 from .summary import build_summary
-from .util import excerpt, redact
+from .util import excerpt, new_id, redact
 
 PAID_PROVIDERS = {"openai", "anthropic", "gemini", "deepseek", "qwen", "openai_compatible", "xai", "openrouter"}
 ZERO_COST_PROVIDERS = {"demo", "ollama"}
@@ -52,6 +52,7 @@ CATALOG = [
     {"provider": "openrouter", "label": "OpenRouter 免费模型", "model_id": "meta-llama/llama-3.2-3b-instruct:free", "paid": False, "key_env": "OPENROUTER_API_KEY", "note": "仅 :free 模型视为零费用"},
     {"provider": "ollama", "label": "Ollama 本地", "model_id": "qwen2.5:7b", "paid": False, "key_env": "", "note": "不下载模型，只连接已有服务"},
     {"provider": "openai_compatible", "label": "OpenAI 兼容接口", "model_id": "", "paid": True, "key_env": "OPENAI_COMPATIBLE_API_KEY", "note": "本机地址视为零费用"},
+    {"provider": "web", "label": "网页会话", "model_id": "web:fixture", "paid": False, "key_env": "", "note": "费用未知，不按 0 计算。只绑定你授权的标签页。"},
 ]
 
 
@@ -90,6 +91,17 @@ class GenRequest:
     prompt: str = ""
     usage: Usage = field(default_factory=Usage)
     is_demo: bool = False
+    session_id: str = ""
+    run_token: str = ""
+    group_id: str = ""
+    context_version: int = 0
+    group_generation: int = 0
+    web_site: str = ""
+    web_origin: str = ""
+    web_tab_key: str = ""
+    web_model_label: str = ""
+    web_auto: bool = False
+    web_open_new: bool = False
 
 
 def render_prompt(req: GenRequest) -> str:
@@ -127,6 +139,24 @@ def render_prompt(req: GenRequest) -> str:
         lines.append("")
         lines.append("现在只写你的公开发言。")
     return "\n".join(lines)
+
+
+def web_forward_text(req: GenRequest) -> str:
+    """Text typed into the site. No hidden prompt, no other groups."""
+    if req.phase == "cross" and req.reply_to:
+        nick = req.reply_to.get("nickname") or "另一位"
+        quote = excerpt(req.reply_to.get("content") or "", 500)
+        return f"{nick} 的公开答复：{quote}\n请只根据这句公开答复补充或质疑。"
+    markers = [
+        item
+        for item in req.transcript
+        if item.get("author_type") == "user" or item.get("event_kind") in {"merge", "split", "share"}
+    ]
+    latest = markers[-1] if markers else None
+    if latest and latest.get("event_kind") in {"merge", "share"}:
+        quote = excerpt(latest.get("content") or "", 700)
+        return "下面只转发被选中的公开答复。请根据这段补充或质疑，不要重复上一问。\n" + quote
+    return req.user_latest or ""
 
 
 def _chunks(text: str, size: int = 18) -> list[str]:
@@ -289,11 +319,29 @@ class RoutedProvider:
         self.client_factory = client_factory or (lambda: httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=5.0), trust_env=False))
         self.demo = demo or DemoProvider()
         self.network_calls = 0
+        self.web = None
 
     def preflight(self, req: GenRequest) -> str | None:
         provider = req.provider
         if provider == "demo":
             return self.demo.preflight(req)
+        if provider == "web":
+            from .webbridge import SITES
+
+            if req.web_site not in SITES:
+                return "网页站点不在允许列表里"
+            if not req.web_origin or not req.web_tab_key:
+                return "这个成员还没有绑定明确的标签页，不会向网页发送。"
+            if not req.web_auto:
+                return "未打开受控自动发送。绑定标签页时需要明确允许。"
+            blocked = self.web.site_blocked(req.web_site) if self.web else "网页桥还没有启动"
+            if blocked:
+                return blocked
+            req.usage.cost_known = False
+            req.usage.cost_usd = 0
+            if req.cost_cap_set:
+                return "网页不提供单价。未知费用不会按 0 放行。"
+            return None
         if provider == "ollama":
             req.usage.cost_known = True
             req.usage.cost_usd = 0
@@ -347,6 +395,10 @@ class RoutedProvider:
             async for chunk in self.demo.stream(req, cancel, stale):
                 yield chunk
             return
+        if req.provider == "web":
+            async for chunk in self._web(req, cancel, stale):
+                yield chunk
+            return
         error = self.preflight(req)
         if error:
             raise ProviderError(error)
@@ -372,6 +424,49 @@ class RoutedProvider:
             req.usage.completion_tokens = 0
         if req.usage.prompt_tokens == 0:
             req.usage.prompt_tokens = max(1, len(req.prompt))
+
+    async def _web(self, req: GenRequest, cancel: asyncio.Event, stale: asyncio.Event) -> AsyncIterator[str]:
+        error = self.preflight(req)
+        if error:
+            raise ProviderError(error)
+        if self.web is None:
+            raise ProviderError("网页桥还没有启动")
+        key = req.web_tab_key or req.member_id
+        async with self.web.tab_lock(key):
+            if cancel.is_set() or stale.is_set():
+                return
+            request_id = new_id()
+            self.web.create_job(
+                {
+                    "request_id": request_id,
+                    "session_id": req.session_id,
+                    "run_token": req.run_token,
+                    "group_id": req.group_id,
+                    "member_id": req.member_id,
+                    "context_version": req.context_version,
+                    "group_generation": req.group_generation,
+                    "origin": req.web_origin,
+                    "site": req.web_site,
+                    "tab_key": key,
+                    "prompt": req.prompt,
+                }
+            )
+            job = await self.web.wait_job(request_id, cancel, stale)
+            if cancel.is_set() or stale.is_set():
+                return
+            if not job or job["status"] != "complete":
+                raise ProviderError((job or {}).get("error") or "网页没有返回新的助手回复")
+            text = job.get("result_text") or ""
+            label = (job.get("model_label") or "").strip()
+            req.web_model_label = label or "未能核验精确 model ID"
+            req.usage.cost_known = False
+            req.usage.cost_usd = 0
+            req.usage.prompt_tokens = max(1, len(req.prompt))
+            req.usage.completion_tokens = len(text)
+            for part in _chunks(text, 80):
+                if cancel.is_set() or stale.is_set():
+                    return
+                yield part
 
     async def _openai(self, req: GenRequest, cancel: asyncio.Event, stale: asyncio.Event) -> AsyncIterator[str]:
         url = chat_completions_url(self.base_url(req))

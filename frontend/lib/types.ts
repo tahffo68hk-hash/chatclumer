@@ -35,6 +35,18 @@ export type Session = {
   member_count?: number;
   created_at: string;
   updated_at: string;
+  layout?: string;
+};
+
+export type RoomGroup = {
+  id: string;
+  session_id: string;
+  name: string;
+  kind: string;
+  status: string;
+  generation: number;
+  settled: boolean;
+  member_ids: string[];
 };
 
 export type Member = {
@@ -76,6 +88,9 @@ export type ChatMessage = {
   cost_usd: number;
   created_at: string;
   finished_at: string | null;
+  group_id?: string | null;
+  audience?: string | null;
+  event_kind?: string | null;
 };
 
 export type CatalogItem = {

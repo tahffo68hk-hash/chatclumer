@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "多模型群聊网页桥",
+  "version": "0.1.0",
+  "description": "在你授权的标签页里读写可见聊天，并只和本机 127.0.0.1 配对。",
+  "permissions": ["storage", "activeTab"],
+  "host_permissions": [
+    "http://127.0.0.1:43124/*",
+    "https://gemini.google.com/*"
+  ],
+  "optional_host_permissions": [
+    "https://chat.qwen.ai/*",
+    "https://chatgpt.com/*",
+    "https://chat.openai.com/*",
+    "https://claude.ai/*",
+    "https://grok.com/*",
+    "https://chat.deepseek.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "配对网页会话"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://127.0.0.1:43124/fixture/*", "https://gemini.google.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
