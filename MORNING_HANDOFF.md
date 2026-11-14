@@ -195,7 +195,11 @@ git status --short
 
 分组和网页桥提交后，用下面的命令核对。若其后只有记下哈希的修订，以 `git rev-parse HEAD` 为准，并确认功能提交仍是祖先。
 
-边界修正和设置页的哈希由下一笔交接提交写入。分组与网页桥仍是祖先：
+边界修正和设置页在：
+
+`332bf76e4824b9ee872c20acf375779ef141ff92`
+
+分组与网页桥仍是祖先：
 
 `989b3b8c0e00b652a270e6b5a6728372e4abc228`
 
@@ -204,7 +208,7 @@ git status --short
 ```bash
 git rev-parse HEAD
 git log -1 --oneline
-git merge-base --is-ancestor 7fd2e7f679d08a5684df0089c53a645196c901f9 HEAD && echo ancestor-ok
+git merge-base --is-ancestor 332bf76e4824b9ee872c20acf375779ef141ff92 HEAD && echo ancestor-ok
 git status --short
 ```
 
