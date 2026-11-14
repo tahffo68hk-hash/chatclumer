@@ -622,3 +622,89 @@ def test_new_yuanbao_layout_sends_and_login_gate_does_not_click():
     assert header_only["chinese"] is True
     assert header_only["hiddenCaptcha"] is False
     assert header_only["shownCaptcha"] is True
+
+
+def test_ab_reply_uses_answer_one_and_timeout_clears_the_composer():
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(channel="chrome", headless=True)
+        page = browser.new_page()
+        page.set_content(
+            """
+            <div class="agent-chat__list__item agent-chat__list__item--ai">
+              <div class="agent-chat__bubble agent-chat__conv--ai--multiple">
+                <div class="agent-chat__conv--ai__multi_speech_tip">You are providing feedback on the new version of Yuanbao. Which answer do you prefer</div>
+                <div>
+                  <h4>Answer 1</h4>
+                  <div class="hyc-content-md" id="answer-1">
+                    <div class="hyc-common-markdown">先读这一句。</div>
+                  </div>
+                  <button type="button" class="prefer">I prefer this answer</button>
+                </div>
+                <div>
+                  <h4>回答 2</h4>
+                  <div class="hyc-content-md" id="answer-2">
+                    <div class="hyc-common-markdown">另一句留在附注里。</div>
+                  </div>
+                  <button type="button" class="prefer">我更喜欢这个答案</button>
+                </div>
+              </div>
+            </div>
+            <div data-new-input-card>
+              <div class="ql-editor" contenteditable="true" data-placeholder="Send Message">第二轮转发</div>
+              <div id="yuanbao-send-btn" aria-label="Send" class="SendButton_sendButton__g3Lcb">Send</div>
+            </div>
+            """
+        )
+        page.add_script_tag(path=str(ROOT / "extension" / "yuanbao.js"))
+        page.evaluate(
+            """() => {
+              window.__prefers = 0;
+              document.querySelectorAll(".prefer").forEach((button) => {
+                button.addEventListener("click", () => { window.__prefers += 1; });
+              });
+            }"""
+        )
+        partial = page.evaluate(
+            """() => {
+              document.querySelector("#answer-1").classList.add("hyc-content-md-done");
+              const node = document.querySelector(".agent-chat__list__item--ai");
+              return { done: yuanbaoDone(node), prefers: window.__prefers };
+            }"""
+        )
+        read = page.evaluate(
+            """() => {
+              document.querySelector("#answer-2").classList.add("hyc-content-md-done");
+              const node = document.querySelector(".agent-chat__list__item--ai");
+              const text = yuanbaoText(node);
+              return { done: yuanbaoDone(node), text, prefers: window.__prefers };
+            }"""
+        )
+        single = page.evaluate(
+            """() => {
+              const node = document.createElement("div");
+              node.className = "agent-chat__list__item agent-chat__list__item--ai";
+              node.innerHTML = '<div class="hyc-content-md hyc-content-md-done"><div class="hyc-common-markdown">单独一句。</div></div><div class="agent-chat__toolbar">复制</div>';
+              return { done: yuanbaoDone(node), text: yuanbaoText(node) };
+            }"""
+        )
+        cleared = page.evaluate(
+            """() => {
+              const composer = yuanbaoComposer(document);
+              yuanbaoClearComposer(composer);
+              return (composer.innerText || composer.textContent || "").trim();
+            }"""
+        )
+        browser.close()
+    assert partial["done"] is False
+    assert partial["prefers"] == 0
+    assert read["done"] is True
+    assert read["text"].startswith("先读这一句。")
+    assert "（元宝给出了 A/B 两个答案，已取答案 1）" in read["text"]
+    assert "答案 2：另一句留在附注里。" in read["text"]
+    assert "Which answer" not in read["text"]
+    assert "prefer" not in read["text"].lower()
+    assert "更喜欢" not in read["text"]
+    assert read["prefers"] == 0
+    assert single["done"] is True
+    assert single["text"] == "单独一句。"
+    assert cleared == ""

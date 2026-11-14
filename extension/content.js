@@ -146,6 +146,12 @@ function cancelResult() {
   };
 }
 
+function releaseComposer(box) {
+  if (typeof yuanbaoClearComposer !== "function") return;
+  const composer = (typeof yuanbaoComposer === "function" && yuanbaoComposer(document)) || box;
+  if (composer) yuanbaoClearComposer(composer);
+}
+
 function clearIfUnsent(box, prompt) {
   if (!box) return;
   const current = ("value" in box && !box.isContentEditable ? box.value : box.innerText || box.textContent || "").trim();
@@ -229,7 +235,10 @@ async function runJob(job) {
     const before = snapshot(adapter);
     const box = adapter.composer();
     if (!box) return { status: "error", detail: "找不到输入框", page_url: pageUrl };
-    if (signal.cancelled || job.action === "cancel") return { ...cancelResult(), page_url: pageUrl };
+    if (signal.cancelled || job.action === "cancel") {
+      if (site === "yuanbao") releaseComposer(box);
+      return { ...cancelResult(), page_url: pageUrl };
+    }
     if (site !== "yuanbao") fillComposer(box, job.prompt);
     remember(job.request_id);
     let posted = false;
@@ -238,6 +247,7 @@ async function runJob(job) {
       const outcome = await yuanbaoDispatchSend(document, job.prompt, 10000, () => signal.cancelled);
       if (signal.cancelled || outcome.detail === "cancelled") {
         if (!outcome.ok) clearIfUnsent(box, job.prompt);
+        releaseComposer(box);
         return { ...cancelResult(), page_url: pageUrl };
       }
       if (!outcome.ok) {
@@ -264,7 +274,10 @@ async function runJob(job) {
       posted = true;
     }
     const result = await waitNew(adapter, before, signal);
-    if (result.status === "cancelled" && !posted) clearIfUnsent(box, job.prompt);
+    if (result.status === "cancelled" || result.detail === "超时") {
+      if (!posted) clearIfUnsent(box, job.prompt);
+      if (site === "yuanbao") releaseComposer(box);
+    }
     if (result.detail === "超时") reportPhase(job, "timeout");
     if (result.status === "cancelled" && !String(result.detail || "").includes("停止")) {
       const stopped = clickSiteStop();

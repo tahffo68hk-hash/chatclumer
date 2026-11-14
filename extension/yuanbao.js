@@ -258,11 +258,10 @@ async function yuanbaoDispatchSend(root, prompt, timeoutMs, shouldAbort) {
   return { ok: false, detail, clicked };
 }
 
-function yuanbaoText(node) {
-  const md = node.querySelector(".hyc-common-markdown");
+function yuanbaoPlain(md) {
   if (!md) return "";
   const clone = md.cloneNode(true);
-  clone.querySelectorAll(".hyc-common-markdown__ref-list, .hyc-card-box-process-list").forEach((el) => el.remove());
+  clone.querySelectorAll(".hyc-common-markdown__ref-list, .hyc-card-box-process-list, button, .agent-chat__conv--ai__multi_speech_tip").forEach((el) => el.remove());
   clone.querySelectorAll("img").forEach((img) => {
     const card = img.parentElement;
     if (card && card !== clone && /全屏查看|View full screen/i.test(card.textContent || "")) card.remove();
@@ -270,7 +269,33 @@ function yuanbaoText(node) {
   return (clone.innerText || clone.textContent || "").replace(/\s+/g, " ").trim();
 }
 
+function yuanbaoMultiple(node) {
+  if (!node) return false;
+  return !!(node.querySelector(".agent-chat__conv--ai--multiple") || (node.classList && node.classList.contains("agent-chat__conv--ai--multiple")));
+}
+
+function yuanbaoAnswerBlocks(node) {
+  return [...node.querySelectorAll(".hyc-content-md")].filter((block) => block.querySelector(".hyc-common-markdown"));
+}
+
+function yuanbaoText(node) {
+  if (!node) return "";
+  if (yuanbaoMultiple(node)) {
+    const answers = [...node.querySelectorAll(".hyc-content-md-done .hyc-common-markdown")].map(yuanbaoPlain).filter(Boolean);
+    if (!answers.length) return "";
+    const note = "（元宝给出了 A/B 两个答案，已取答案 1）";
+    const second = answers[1] ? `\n\n答案 2：${answers[1]}` : "";
+    return `${answers[0]}\n\n${note}${second}`;
+  }
+  return yuanbaoPlain(node.querySelector(".hyc-common-markdown"));
+}
+
 function yuanbaoDone(node) {
+  if (!node) return false;
+  if (yuanbaoMultiple(node)) {
+    const blocks = yuanbaoAnswerBlocks(node);
+    return blocks.length >= 2 && blocks.every((block) => block.classList.contains("hyc-content-md-done"));
+  }
   const finished = node.querySelector(".hyc-content-md-done");
   const toolbar = node.querySelector(".agent-chat__conv--ai__toolbar, .agent-chat__toolbar");
   return !!(finished && toolbar);

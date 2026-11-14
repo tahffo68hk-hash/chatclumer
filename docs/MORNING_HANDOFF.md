@@ -85,7 +85,7 @@ bash scripts/start.sh
 | 独立分支、合并预览、拆分 | 页面可用。演示回复仍标明非真实模型 |
 | 本地夹具网页成员 | 扩展 → 本机桥 → 房间已跑通。夹具不是真实模型 |
 | Gemini 游客网页 | 2026-11-15 01:30 CST 扩展回路通过，页面显示 Flash-Lite。另一成员是演示模型 |
-| 元宝网页 | 2026-11-15 起游客输入关闭。先在该标签页登录一次。扩展不关登录弹窗。登录后的自动发送仍待实页验收 |
+| 元宝网页 | 登录后自动发送已在 2026-11-15 实页核对（旧输入区，一条用户气泡）。A/B 读回已改，待实页再核对 |
 | 智谱网页 | 游客页可以人工使用。扩展不自动点击发送 |
 | 设置 | 房间标题旁的「设置」：浅色/深色/跟随系统、字号、导出、本机配对码 |
 | 收藏和分歧 | 收藏卡片写明不是已核实事实。分歧只列显式质疑或反驳，没有就空着，不编共识 |
@@ -107,8 +107,8 @@ bash scripts/start.sh
 
 记录里的 UTC 已换成北京时间。2026-11-14T17:30:36Z 是 2026-11-15 01:30:36 CST。清单如下。
 
-- 旧的 21 个测试仍在。本机装了 Playwright 时，`cd backend && .venv/bin/pytest -q` 是 40 passed。其中 6 条是浏览器测试：夹具停止按钮，以及元宝结构夹具（新气泡、编辑器状态、推荐卡片 60 秒不点击、同一任务只写一次、新输入区和登录层）。没有 Playwright 时是 34 passed, 6 skipped。skipped 不是 passed。安装见 `backend/requirements-dev.txt`。
-- 元宝游客聊天从 2026-11-15 起要先在标签页登录一次。扩展 0.2.6 同时认旧的 `[data-new-input-card]` 和新的 `#searchbar-editor`。页头登录按钮和「Not logged in」本身不算挡住。看到登录弹窗、登录占位符或验证层就停，不关弹窗，也不点登录。已填入未发送时，成员状态带待发长度、实际长度和是否重复。登录后的自动发送仍标「等待协调方实页验收」。本机没有重跑元宝游客发送。
+- 旧的 21 个测试仍在。本机装了 Playwright 时，`cd backend && .venv/bin/pytest -q` 是 41 passed。其中 7 条是浏览器测试：夹具停止按钮，以及元宝结构夹具（新气泡、编辑器状态、推荐卡片 60 秒不点击、同一任务只写一次、新输入区和登录层、A/B 读回和清空残留）。没有 Playwright 时是 34 passed, 7 skipped。skipped 不是 passed。安装见 `backend/requirements-dev.txt`。
+- 元宝登录后的自动发送已在 2026-11-15 实页核对：旧输入区，`data-placeholder="Send Message"`，只有一条用户气泡。扩展 0.2.7 在 A/B 气泡（`.agent-chat__conv--ai--multiple`）两段都带 `-done` 后取第一段正文，并写上「已取答案 1」，不点偏好按钮。停止、超时或取消时清空输入框。这次读回还没有在实页再核对。
 - 浏览器：`backend/.venv/bin/python scripts/check_branch_ui.py` 通过。预览里有勾选的两人，没有未勾选的第三人；合并后能选择发给哪一组；拆分后刷新，状态不是进行中。
 - 扩展：品牌版 Chrome 157 不接受 `--load-extension`。Chrome for Testing 加载 `extension/` 后，`scripts/check_web_bridge.py` 的夹具和 Gemini 都是 passed。夹具第二次提交含「公开答复」，停止后仍是 2 条用户气泡，房间里有 2 条完成回复，模型名是「Fixture 本地」。
 - Gemini：https://gemini.google.com/app ，游客，页面显示 Flash-Lite。扩展先发送「请用中文给两条简短读书建议，每条一句话。」，房间记下两条建议；合并后再把选中的公开答复发进同一个页面，房间记下第二条回复；停止后 4 秒内没有新的助手消息。没有点登录、订阅或模式切换。
