@@ -82,6 +82,8 @@ class RoomEngine:
             cleaned = " ".join((note or "").split())[:180]
             if phase == "unsent" and cleaned.startswith("已填入，未发送") and "待发长度" in cleaned:
                 text = cleaned
+            if phase == "timeout" and cleaned.startswith("超时"):
+                text = cleaned
             for message in reversed(self.db.list_messages(job["session_id"])):
                 if message.get("member_id") == job.get("member_id") and message.get("status") == "streaming":
                     updated = self.db.update_message(message["id"], content=text)
@@ -775,7 +777,10 @@ class RoomEngine:
         pool = self._participants(session_id, self.db.get_session(session_id), current_members, latest)
         speakers, passed = self._select(session_id, run_token, pool, round_no, version)
         for member in passed:
-            self._system(session_id, f"{member['nickname']} 选择本轮不发言。", round_no)
+            if self._web_reply_failed(session_id, run_token, member["id"]):
+                self._system(session_id, f"{member['nickname']} 上一轮没有读到回复，本轮不再向这个网页转发。重新发起后才会再试。", round_no)
+            else:
+                self._system(session_id, f"{member['nickname']} 选择本轮不发言。", round_no)
         if not speakers:
             return "all_passed"
         results = []
@@ -865,6 +870,9 @@ class RoomEngine:
             if self._should_pass(session_id, run_token, member, version, round_no):
                 passed.append(member)
                 continue
+            if self._web_reply_failed(session_id, run_token, member["id"]):
+                passed.append(member)
+                continue
             score = _jitter(member["id"], round_no, version)
             if member["id"] in mentioned:
                 score += 100
@@ -891,6 +899,14 @@ class RoomEngine:
             count = 2
         count = min(count, remaining, len(ranked))
         return [item[2] for item in ranked[:count]], passed
+
+    def _web_reply_failed(self, session_id: str, run_token: str, member_id: str) -> bool:
+        for item in self.db.list_messages(session_id):
+            if item.get("run_token") != run_token or item.get("member_id") != member_id:
+                continue
+            if item.get("author_type") == "ai" and item.get("status") == "error":
+                return True
+        return False
 
     def _should_pass(self, session_id: str, run_token: str, member: dict, version: int, round_no: int) -> bool:
         if round_no < 3:
@@ -919,6 +935,8 @@ class RoomEngine:
     ) -> str:
         if cancel.is_set():
             return "stopped"
+        if member.get("provider") == "web" and self._web_reply_failed(session_id, run_token, member["id"]):
+            return "skip"
         session = self.db.get_session(session_id)
         if not session or session["status"] == "stopped":
             return "stopped"

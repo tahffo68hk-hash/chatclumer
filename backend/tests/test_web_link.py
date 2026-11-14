@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
@@ -69,6 +70,63 @@ def test_extension_tab_heartbeat_rejects_another_site(tmp_path):
     assert missing.json()["detail"] == "成员 ID 不存在"
 
 
+def test_failed_web_reply_is_not_forwarded_until_the_next_run(tmp_path):
+    from app.webbridge import WEB_JOB_WAIT_S
+
+    content = (Path(__file__).resolve().parents[2] / "extension" / "content.js").read_text()
+    assert "readCap: 90000" in content
+    assert WEB_JOB_WAIT_S >= 120
+    assert WEB_JOB_WAIT_S > 90
+    app = create_app(str(tmp_path / "room.db"), str(tmp_path / "secrets.json"))
+    client = TestClient(app)
+    created = client.post("/api/sessions", json={"title": "转发", "max_rounds": 4, "max_seconds": 60}).json()
+    saved = client.post(f"/api/sessions/{created['id']}/members/web", json=_web_body(nickname="元宝网页")).json()
+    app.state.db.add_message(
+        {
+            "session_id": created["id"],
+            "author_type": "user",
+            "content": "请给一个读书建议",
+            "status": "complete",
+            "run_token": "run-1",
+        }
+    )
+    member = app.state.db.list_members(created["id"])[0]
+    speakers, _passed = app.state.engine._select(created["id"], "run-1", [member], 2, 1)
+    assert [item["id"] for item in speakers] == [saved["id"]]
+    app.state.db.add_message(
+        {
+            "session_id": created["id"],
+            "author_type": "ai",
+            "member_id": saved["id"],
+            "nickname": "元宝网页",
+            "provider": "web",
+            "content": "超时",
+            "status": "error",
+            "run_token": "run-1",
+            "phase": "independent",
+        }
+    )
+    again, passed = app.state.engine._select(created["id"], "run-1", [member], 3, 1)
+    assert again == []
+    assert [item["id"] for item in passed] == [saved["id"]]
+    fresh, _fresh_passed = app.state.engine._select(created["id"], "run-2", [member], 2, 1)
+    assert [item["id"] for item in fresh] == [saved["id"]]
+    app.state.db.conn.execute("UPDATE sessions SET status='stopped' WHERE id=?", (created["id"],))
+    app.state.db.conn.commit()
+    assert app.state.engine.web.create_job(
+        {
+            "request_id": "after-stop",
+            "session_id": created["id"],
+            "member_id": saved["id"],
+            "context_version": 1,
+            "origin": "http://127.0.0.1:43124",
+            "site": "fixture",
+            "tab_key": "fixture-key",
+            "prompt": "不要再填",
+        }
+    ) is None
+
+
 def test_unbound_tab_does_not_send_and_progress_replaces_the_waiting_line(tmp_path):
     app = create_app(str(tmp_path / "room.db"), str(tmp_path / "secrets.json"))
     client = TestClient(app)
@@ -96,6 +154,8 @@ def test_unbound_tab_does_not_send_and_progress_replaces_the_waiting_line(tmp_pa
             "status": "streaming",
         }
     )
+    app.state.db.conn.execute("UPDATE sessions SET status='running' WHERE id=?", (created["id"],))
+    app.state.db.conn.commit()
     app.state.engine.web.create_job(
         {
             "request_id": "job-progress",

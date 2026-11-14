@@ -85,7 +85,7 @@ bash scripts/start.sh
 | 独立分支、合并预览、拆分 | 页面可用。演示回复仍标明非真实模型 |
 | 本地夹具网页成员 | 扩展 → 本机桥 → 房间已跑通。夹具不是真实模型 |
 | Gemini 游客网页 | 2026-11-15 01:30 CST 扩展回路通过，页面显示 Flash-Lite。另一成员是演示模型 |
-| 元宝网页 | 2026-11-15 起游客输入关闭。先在该标签页登录一次。扩展不关登录弹窗。登录后的自动发送仍待实页验收 |
+| 元宝网页 | 登录后自动发送已核对。0.2.7 的 A/B 读回仍超时。0.2.8 改成一段完成即读，待实页再核对 |
 | 智谱网页 | 游客页可以人工使用。扩展不自动点击发送 |
 | 设置 | 房间标题旁的「设置」：浅色/深色/跟随系统、字号、导出、本机配对码 |
 | 收藏和分歧 | 收藏卡片写明不是已核实事实。分歧只列显式质疑或反驳，没有就空着，不编共识 |
@@ -107,8 +107,8 @@ bash scripts/start.sh
 
 记录里的 UTC 已换成北京时间。2026-11-14T17:30:36Z 是 2026-11-15 01:30:36 CST。清单如下。
 
-- 旧的 21 个测试仍在。本机装了 Playwright 时，`cd backend && .venv/bin/pytest -q` 是 40 passed。其中 6 条是浏览器测试：夹具停止按钮，以及元宝结构夹具（新气泡、编辑器状态、推荐卡片 60 秒不点击、同一任务只写一次、新输入区和登录层）。没有 Playwright 时是 34 passed, 6 skipped。skipped 不是 passed。安装见 `backend/requirements-dev.txt`。
-- 元宝游客聊天从 2026-11-15 起要先在标签页登录一次。扩展 0.2.6 同时认旧的 `[data-new-input-card]` 和新的 `#searchbar-editor`。页头登录按钮和「Not logged in」本身不算挡住。看到登录弹窗、登录占位符或验证层就停，不关弹窗，也不点登录。已填入未发送时，成员状态带待发长度、实际长度和是否重复。登录后的自动发送仍标「等待协调方实页验收」。本机没有重跑元宝游客发送。
+- 旧的 21 个测试仍在。本机装了 Playwright 时，`cd backend && .venv/bin/pytest -q` 是 42 passed。其中 7 条是浏览器测试。没有 Playwright 时是 35 passed, 7 skipped。skipped 不是 passed。安装见 `backend/requirements-dev.txt`。
+- 元宝登录后的自动发送已在实页核对。0.2.7 因等待 A/B 两段都完成而在约 90 秒后被桥接判超时，下一轮转发还留在输入框。扩展 0.2.8 只要求一段 `-done`、正文稳定约 2.5 秒、发送按钮回到空闲；新回复认作用户气泡后面的最后一条 AI。读取上限 90 秒，桥接等待 120 秒。同一轮失败后不再转发。读回仍待实页再核对。
 - 浏览器：`backend/.venv/bin/python scripts/check_branch_ui.py` 通过。预览里有勾选的两人，没有未勾选的第三人；合并后能选择发给哪一组；拆分后刷新，状态不是进行中。
 - 扩展：品牌版 Chrome 157 不接受 `--load-extension`。Chrome for Testing 加载 `extension/` 后，`scripts/check_web_bridge.py` 的夹具和 Gemini 都是 passed。夹具第二次提交含「公开答复」，停止后仍是 2 条用户气泡，房间里有 2 条完成回复，模型名是「Fixture 本地」。
 - Gemini：https://gemini.google.com/app ，游客，页面显示 Flash-Lite。扩展先发送「请用中文给两条简短读书建议，每条一句话。」，房间记下两条建议；合并后再把选中的公开答复发进同一个页面，房间记下第二条回复；停止后 4 秒内没有新的助手消息。没有点登录、订阅或模式切换。
@@ -201,7 +201,15 @@ git status --short
 
 分组和网页桥提交后，用下面的命令核对。若其后只有记下哈希的修订，以 `git rev-parse HEAD` 为准，并确认功能提交仍是祖先。
 
-元宝新输入区和登录层在：
+元宝一段完成即读回在：
+
+`3335c75d02aa85b33eb9e32f41d6acdd76f7286e`
+
+元宝 A/B 读回仍是祖先：
+
+`a847146d5b6864bb20531cf54294b73526829f90`
+
+元宝新输入区和登录层仍是祖先：
 
 `2c5fe1aa64fcafe4fd92f8f1414f1bdd2177a413`
 
@@ -230,7 +238,7 @@ git status --short
 ```bash
 git rev-parse HEAD
 git log -1 --oneline
-git merge-base --is-ancestor 2c5fe1aa64fcafe4fd92f8f1414f1bdd2177a413 HEAD && echo ancestor-ok
+git merge-base --is-ancestor 3335c75d02aa85b33eb9e32f41d6acdd76f7286e HEAD && echo ancestor-ok
 git status --short
 ```
 
