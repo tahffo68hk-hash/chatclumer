@@ -70,7 +70,7 @@ bash scripts/start.sh
 - 自由群聊不是固定全员轮询：首轮在没有 token/费用上限时并发独立回答；之后每轮通常只点一位（提及 +100、上一位建议 +40、刚说过的人 -35）。提示词带已公开记录。演示模板在被点到时总会写一段话，不会自己弃权。真实模型可以写出「没有新的观点」，之后调度可以不再点他。调度在发请求之前决定本轮谁不开口，模型不能零请求弃权。
 - 没有单价的 OpenRouter 模型（不是明确的 `:free` 结尾）直接拒绝，不会按 0 美元放行，也不会去掉后缀改走收费模型。`:free` 请求关闭 OpenRouter fallback。这次没有真实调用。
 - QQ / 微信仍是 `BLOCKED_EXTERNAL`。本轮没有做 P1。
-- 分组和网页桥已经接到房间里。独立分支、合并预览、拆分可以在页面上操作。网页成员只有绑定了明确标签、打开受控自动发送、并且房间没有费用上限时才会发送。Gemini 的游客回路通过了；Qwen 停在年龄确认；元宝游客输入从 2026-11-15 起要先在标签页登录一次；智谱游客可用但扩展不自动点发送；DeepSeek 和豆包需要登录；ChatGPT、Claude 是 BLOCKED；Grok 是登录墙。详见 `docs/WEB_ACCESS.md`。不要把夹具或被挡住的站点说成已经接通。
+- 分组和网页桥已经接到房间里。独立分支、合并预览、拆分可以在页面上操作。网页成员只有绑定了明确标签、打开受控自动发送、并且房间没有费用上限时才会发送。Gemini 的游客回路通过了；Qwen 停在年龄确认；元宝游客输入从 2026-11-15 起要先在标签页登录一次；智谱游客可用但扩展不自动点发送；DeepSeek 和豆包需要登录；ChatGPT、Claude 是 BLOCKED；Grok 是登录墙。详见 `WEB_ACCESS.md`。不要把夹具或被挡住的站点说成已经接通。
 
 ## 哪些能用
 
@@ -118,17 +118,17 @@ bash scripts/start.sh
 
 截图：
 
-- [分支预览](docs/screenshots/branches-preview.png)
-- [分支桌面](docs/screenshots/branches-desktop.png)
-- [分支窄屏](docs/screenshots/branches-mobile.png)
-- [夹具扩展回路](docs/screenshots/fixture-bridge.png)
-- [Gemini 扩展回路](docs/screenshots/gemini-bridge.png)
-- [Qwen 停在年龄确认](docs/screenshots/qwen-manual.png)
-- [设置，深色](docs/screenshots/settings-dark.png)
-- [设置，窄屏](docs/screenshots/settings-mobile.png)
-- [本机元宝发送后回到登录](docs/screenshots/yuanbao-vm-guest.png)
-- [协调方人工停止元宝，不是扩展回路](docs/screenshots/yuanbao-guest-stop-manual.webp)
-- [网页成员绑定字段](docs/screenshots/web-bind-member.png)
+- [分支预览](screenshots/branches-preview.png)
+- [分支桌面](screenshots/branches-desktop.png)
+- [分支窄屏](screenshots/branches-mobile.png)
+- [夹具扩展回路](screenshots/fixture-bridge.png)
+- [Gemini 扩展回路](screenshots/gemini-bridge.png)
+- [Qwen 停在年龄确认](screenshots/qwen-manual.png)
+- [设置，深色](screenshots/settings-dark.png)
+- [设置，窄屏](screenshots/settings-mobile.png)
+- [本机元宝发送后回到登录](screenshots/yuanbao-vm-guest.png)
+- [协调方人工停止元宝，不是扩展回路](screenshots/yuanbao-guest-stop-manual.webp)
+- [网页成员绑定字段](screenshots/web-bind-member.png)
 
 ## 实际测试
 
@@ -156,17 +156,17 @@ member persisted
 
 截图在包内，相对本文件：
 
-- [运行中停止前](docs/screenshots/stop-while-running.png)
-- [停止后没有新消息](docs/screenshots/stopped-no-new-messages.png)
-- [已暂停](docs/screenshots/paused.png)
-- [已继续](docs/screenshots/resumed.png)
-- [只点到周衡](docs/screenshots/mention-zhouheng.png)
-- [成员刷新后仍在](docs/screenshots/member-persisted.png)
-- [回归：演示回复](docs/screenshots/regression-demo.png)
-- [回归：本地回顾](docs/screenshots/regression-local-summary.png)
-- [桌面讨论](docs/screenshots/desktop-discussion.png)
-- [桌面总结](docs/screenshots/desktop-summary.png)
-- [窄屏](docs/screenshots/mobile-chat.png)
+- [运行中停止前](screenshots/stop-while-running.png)
+- [停止后没有新消息](screenshots/stopped-no-new-messages.png)
+- [已暂停](screenshots/paused.png)
+- [已继续](screenshots/resumed.png)
+- [只点到周衡](screenshots/mention-zhouheng.png)
+- [成员刷新后仍在](screenshots/member-persisted.png)
+- [回归：演示回复](screenshots/regression-demo.png)
+- [回归：本地回顾](screenshots/regression-local-summary.png)
+- [桌面讨论](screenshots/desktop-discussion.png)
+- [桌面总结](screenshots/desktop-summary.png)
+- [窄屏](screenshots/mobile-chat.png)
 
 ## 环境限制
 
