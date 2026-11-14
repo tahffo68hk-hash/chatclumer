@@ -14,7 +14,12 @@ function yuanbaoControl(root, labels) {
 }
 
 function yuanbaoNormalize(value) {
-  return String(value || "").replace(/[\u200b\u200c\u200d\ufeff]/g, "").replace(/\s+/g, " ").trim();
+  return String(value || "")
+    .replace(/[\u200b\u200c\u200d\ufeff]/g, "")
+    .replace(/\u00a0/g, " ")
+    .replace(/[\r\n]+$/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function yuanbaoSendIn(scope) {
@@ -109,11 +114,7 @@ function yuanbaoClearComposer(composer) {
   composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContentBackward" }));
 }
 
-function yuanbaoCommitPrompt(root, prompt) {
-  const composer = yuanbaoComposer(root);
-  if (!composer) return false;
-  const text = String(prompt || "");
-  yuanbaoClearComposer(composer);
+function yuanbaoPlaceCaret(composer) {
   composer.focus();
   const selection = window.getSelection();
   const range = document.createRange();
@@ -121,21 +122,74 @@ function yuanbaoCommitPrompt(root, prompt) {
   range.collapse(false);
   selection.removeAllRanges();
   selection.addRange(range);
-  document.execCommand("insertText", false, text);
-  if (!yuanbaoSendUsable(root) || !yuanbaoSame(composer, text)) {
-    composer.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, cancelable: true, inputType: "insertText", data: text }));
-    composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }));
+}
+
+function yuanbaoMatchState(composer, prompt) {
+  const expected = yuanbaoNormalize(prompt);
+  const actual = yuanbaoComposerText(composer);
+  if (actual === expected) return "match";
+  const compact = (value) => value.replace(/\s/g, "");
+  if (expected && compact(actual) === compact(expected) + compact(expected)) return "duplicate";
+  return "mismatch";
+}
+
+function yuanbaoDiagnosis(composer, prompt) {
+  const expected = yuanbaoNormalize(prompt);
+  const actual = yuanbaoComposerText(composer);
+  const duplicate = yuanbaoMatchState(composer, prompt) === "duplicate";
+  return `待发长度 ${expected.length}，实际长度 ${actual.length}，${duplicate ? "重复" : "不重复"}`;
+}
+
+async function yuanbaoSettle(composer, prompt, shouldAbort) {
+  const deadline = Date.now() + 1500;
+  while (true) {
+    if (shouldAbort && shouldAbort()) return "cancelled";
+    const state = yuanbaoMatchState(composer, prompt);
+    if (state === "match" || state === "duplicate") return state;
+    if (Date.now() >= deadline) return state;
+    await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  if (!yuanbaoSendUsable(root) || !yuanbaoSame(composer, text)) {
-    try {
-      const data = new DataTransfer();
-      data.setData("text/plain", text);
-      composer.dispatchEvent(new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: data }));
-    } catch {
-      /* 这个浏览器不接受合成粘贴事件 */
-    }
+}
+
+async function yuanbaoCommitPrompt(root, prompt, shouldAbort) {
+  const composer = yuanbaoComposer(root);
+  if (!composer) return { ok: false, detail: "找不到输入框" };
+  const text = String(prompt || "");
+  const writers = [
+    () => {
+      yuanbaoClearComposer(composer);
+      yuanbaoPlaceCaret(composer);
+      document.execCommand("insertText", false, text);
+    },
+    () => {
+      yuanbaoClearComposer(composer);
+      yuanbaoPlaceCaret(composer);
+      const before = yuanbaoComposerText(composer);
+      composer.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, cancelable: true, inputType: "insertText", data: text }));
+      if (yuanbaoComposerText(composer) === before) {
+        composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }));
+      }
+    },
+    () => {
+      yuanbaoClearComposer(composer);
+      yuanbaoPlaceCaret(composer);
+      try {
+        const data = new DataTransfer();
+        data.setData("text/plain", text);
+        composer.dispatchEvent(new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: data }));
+      } catch {
+        /* 这个浏览器不接受合成粘贴事件 */
+      }
+    },
+  ];
+  for (const write of writers) {
+    write();
+    const state = await yuanbaoSettle(composer, text, shouldAbort);
+    if (state === "match") return { ok: true };
+    if (state === "cancelled") return { ok: false, detail: "cancelled" };
+    yuanbaoClearComposer(composer);
   }
-  return yuanbaoSame(composer, text);
+  return { ok: false, detail: yuanbaoDiagnosis(composer, text) };
 }
 
 async function yuanbaoDispatchSend(root, prompt, timeoutMs, shouldAbort) {
@@ -144,7 +198,15 @@ async function yuanbaoDispatchSend(root, prompt, timeoutMs, shouldAbort) {
   if (yuanbaoLogin(root)) return { ok: false, detail: "页面停在登录或验证，没有点击发送", clicked: false };
   const composer = yuanbaoComposer(root);
   if (!composer) return { ok: false, detail: "找不到输入框", clicked: false };
-  const matched = yuanbaoCommitPrompt(root, prompt);
+  const committed = await yuanbaoCommitPrompt(root, prompt, shouldAbort);
+  if (!committed.ok) {
+    if (committed.detail !== "cancelled") yuanbaoClearComposer(composer);
+    const detail = committed.detail === "cancelled" || committed.detail === "找不到输入框"
+      ? committed.detail
+      : `输入框内容和待发文本不一致，没有点击发送。${committed.detail}`;
+    return { ok: false, detail, clicked: false };
+  }
+  const matched = true;
   const before = yuanbaoHumans(root).length;
   let clicked = false;
   let pressedAt = 0;

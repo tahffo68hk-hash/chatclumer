@@ -105,8 +105,8 @@ bash scripts/start.sh
 
 记录里的 UTC 已换成北京时间。2026-11-14T17:30:36Z 是 2026-11-15 01:30:36 CST。清单如下。
 
-- 旧的 21 个测试仍在。本机装了 Playwright 时，`cd backend && .venv/bin/pytest -q` 是 38 passed。其中 4 条是浏览器测试：夹具停止按钮，以及元宝结构夹具（新气泡、编辑器状态、推荐卡片 60 秒不点击）。没有 Playwright 时是 34 passed, 4 skipped。skipped 不是 passed。安装见 `backend/requirements-dev.txt`。
-- 元宝自动发送仍标为「等待协调方实页验收」，不是扩展端到端。扩展 0.2.4 把发送控件限定在编辑器最近的 `[data-new-input-card]`，优先点 `#yuanbao-send-btn` 这个 div。启用看 `SendButton_disabled` / `SendButton_sendNot` 前缀，并要等 `ql-blank` 消失。点击是 pointerdown 到 click 的一整串，没有新的用户气泡再在 `.ql-editor` 上补一次 Enter。夹具只听这串指针事件，单独 click 或改 textContent 不会发出。10 秒内没有 `--human` 就报「已填入，未发送」并清空。绑定和心跳仍不点击。智谱仍不自动点。本机没有重跑元宝游客发送。
+- 旧的 21 个测试仍在。本机装了 Playwright 时，`cd backend && .venv/bin/pytest -q` 是 39 passed。其中 5 条是浏览器测试：夹具停止按钮，以及元宝结构夹具（新气泡、编辑器状态、推荐卡片 60 秒不点击、同一任务只写一次）。没有 Playwright 时是 34 passed, 5 skipped。skipped 不是 passed。安装见 `backend/requirements-dev.txt`。
+- 元宝自动发送仍标为「等待协调方实页验收」，不是扩展端到端。扩展 0.2.5 在每种写入后最多等 1.5 秒，先看归一化文本是否等于待发文本；等于就停止回退，再等发送 class 去掉 `SendButton_disabled`。若变成重复，先全选删除再试下一种，不在已有文字上追加。内容脚本用页面单例和任务 id 去重；扩展上下文失效就不再发送。不一致时只写待发长度、实际长度和是否重复。夹具里 class 延迟 300ms 只写入一次。本机没有重跑元宝游客发送。
 - 浏览器：`backend/.venv/bin/python scripts/check_branch_ui.py` 通过。预览里有勾选的两人，没有未勾选的第三人；合并后能选择发给哪一组；拆分后刷新，状态不是进行中。
 - 扩展：品牌版 Chrome 157 不接受 `--load-extension`。Chrome for Testing 加载 `extension/` 后，`scripts/check_web_bridge.py` 的夹具和 Gemini 都是 passed。夹具第二次提交含「公开答复」，停止后仍是 2 条用户气泡，房间里有 2 条完成回复，模型名是「Fixture 本地」。
 - Gemini：https://gemini.google.com/app ，游客，页面显示 Flash-Lite。扩展先发送「请用中文给两条简短读书建议，每条一句话。」，房间记下两条建议；合并后再把选中的公开答复发进同一个页面，房间记下第二条回复；停止后 4 秒内没有新的助手消息。没有点登录、订阅或模式切换。

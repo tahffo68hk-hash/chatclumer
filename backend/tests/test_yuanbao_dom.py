@@ -196,6 +196,8 @@ def test_editor_state_not_dom_text_enables_send_and_cards_are_not_clicked():
               let model = "";
               window.__cards = 0;
               window.__sends = 0;
+              window.__writes = 0;
+              window.__paintToken = 0;
               window.__seq = [];
               const paint = () => {
                 const send = document.querySelector("#yuanbao-send-btn");
@@ -227,12 +229,27 @@ def test_editor_state_not_dom_text_enables_send_and_cards_are_not_clicked():
                 button.addEventListener("pointerdown", () => { window.__cards += 1; });
               });
               editor.addEventListener("beforeinput", (event) => {
-                if (event.inputType === "deleteContentBackward") model = "";
-                if (event.inputType === "insertText") model = event.data || "";
-                paint();
+                if (event.inputType === "deleteContentBackward") {
+                  window.__paintToken += 1;
+                  model = "";
+                  paint();
+                }
+                if (event.inputType === "insertText") {
+                  window.__writes += 1;
+                  model = `${model}${event.data || ""}`;
+                  paint();
+                }
               });
               document.execCommand = (command, _ui, value) => {
-                if (command === "insertText") editor.textContent = String(value || "");
+                if (command === "insertText") {
+                  window.__writes += 1;
+                  model = String(value || "");
+                  editor.textContent = model;
+                  const token = ++window.__paintToken;
+                  setTimeout(() => {
+                    if (token === window.__paintToken) paint();
+                  }, 300);
+                }
                 return true;
               };
               editor.textContent = "请用一句话给一个读书建议。";
@@ -256,6 +273,7 @@ def test_editor_state_not_dom_text_enables_send_and_cards_are_not_clicked():
               sends: window.__sends,
               model: window.__model(),
               blank: document.querySelector(".ql-editor").classList.contains("ql-blank"),
+              writes: window.__writes,
             })"""
         )
         prefixes = page.evaluate(
@@ -312,6 +330,7 @@ def test_editor_state_not_dom_text_enables_send_and_cards_are_not_clicked():
     assert counts["sends"] == 1
     assert counts["blank"] is False
     assert counts["model"] == "请用一句话给一个读书建议。"
+    assert counts["writes"] == 1
     assert quiet["detail"] == "已填入，未发送"
     assert cleared == ""
     assert again["ok"] is True
@@ -367,3 +386,126 @@ def test_binding_and_heartbeat_do_not_click_recommendation_cards():
         browser.close()
     assert installed is True
     assert clicks == 0
+
+
+def test_one_task_is_written_once_when_the_script_is_injected_twice():
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(channel="chrome", headless=True)
+        page = browser.new_page()
+        page.route(
+            "https://yuanbao.tencent.com/chat",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="text/html",
+                body="""
+                <div data-new-input-card>
+                  <div class="ql-editor ql-blank" contenteditable="true" data-placeholder="Send Message"><p><br></p></div>
+                  <div id="yuanbao-send-btn" aria-label="Send" class="SendButton_sendButton__g3Lcb SendButton_disabled__v1PnQ SendButton_sendNot__sUMPk"></div>
+                </div>
+                """,
+            ),
+        )
+        page.goto("https://yuanbao.tencent.com/chat")
+        page.evaluate(
+            """() => {
+              const listeners = [];
+              window.chrome = {
+                runtime: {
+                  id: "room-test",
+                  onMessage: {
+                    addListener(fn) { listeners.push(fn); },
+                    removeListener() {},
+                  },
+                  sendMessage() {},
+                  lastError: null,
+                },
+              };
+              window.__listeners = listeners;
+              window.__writes = 0;
+              const editor = document.querySelector(".ql-editor");
+              const send = document.querySelector("#yuanbao-send-btn");
+              let model = "";
+              const paint = () => {
+                editor.classList.toggle("ql-blank", !model.trim());
+                editor.textContent = model;
+                send.className = model.trim()
+                  ? "SendButton_sendButton__g3Lcb"
+                  : "SendButton_sendButton__g3Lcb SendButton_disabled__late SendButton_sendNot__late";
+              };
+              document.execCommand = (command, _ui, value) => {
+                if (command === "insertText") {
+                  window.__writes += 1;
+                  model = String(value || "");
+                  editor.textContent = model;
+                  const token = ++window.__paintToken;
+                  setTimeout(() => {
+                    if (token !== window.__paintToken) return;
+                    paint();
+                  }, 300);
+                }
+                return true;
+              };
+              window.__paintToken = 0;
+              editor.addEventListener("beforeinput", (event) => {
+                if (event.inputType === "insertText") {
+                  window.__writes += 1;
+                  model = `${model}${event.data || ""}`;
+                  paint();
+                }
+                if (event.inputType === "deleteContentBackward") model = "";
+              });
+              send.addEventListener("pointerdown", () => {
+                if ([...send.classList].some((name) => name.startsWith("SendButton_disabled"))) return;
+                const row = document.createElement("div");
+                row.className = "agent-chat__list__item--human";
+                document.body.appendChild(row);
+                const ai = document.createElement("div");
+                ai.className = "agent-chat__list__item--ai";
+                ai.innerHTML = '<div class="hyc-common-markdown hyc-content-md-done">收到</div><div class="agent-chat__toolbar">复制</div>';
+                document.body.appendChild(ai);
+              });
+            }"""
+        )
+        page.add_script_tag(path=str(ROOT / "extension" / "yuanbao.js"))
+        page.add_script_tag(path=str(ROOT / "extension" / "content.js"))
+        page.add_script_tag(path=str(ROOT / "extension" / "content.js"))
+        installed = page.evaluate("() => window.__listeners.length")
+        outcome = page.evaluate(
+            """() => new Promise((resolve) => {
+              const replies = [];
+              const job = { request_id: "job-once", site: "yuanbao", prompt: "请用一句话给一个读书建议。", action: "send" };
+              const finish = () => resolve({ listeners: window.__listeners.length, writes: window.__writes, replies });
+              if (!window.__listeners.length) {
+                finish();
+                return;
+              }
+              for (const listener of window.__listeners) {
+                listener({ type: "run", job }, {}, (result) => {
+                  replies.push(result && result.status);
+                  if (replies.length >= window.__listeners.length) finish();
+                });
+              }
+              setTimeout(finish, 5000);
+            })"""
+        )
+        doubled = page.evaluate(
+            """() => {
+              const editor = document.querySelector(".ql-editor");
+              const twice = "请用一句话给一个读书建议。请用一句话给一个读书建议。";
+              document.execCommand = () => {
+                editor.textContent = twice;
+                return true;
+              };
+              editor.addEventListener("beforeinput", (event) => {
+                if (event.inputType === "insertText") editor.textContent = twice;
+              });
+              editor.addEventListener("paste", () => { editor.textContent = twice; });
+              return yuanbaoDispatchSend(document, "请用一句话给一个读书建议。", 800);
+            }"""
+        )
+        browser.close()
+    assert installed == 1
+    assert outcome["writes"] == 1
+    assert "读书建议" not in doubled["detail"]
+    assert "重复" in doubled["detail"]
+    assert "待发长度" in doubled["detail"]

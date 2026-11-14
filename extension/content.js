@@ -202,8 +202,8 @@ async function runJob(job) {
   const adapter = adapters[site];
   if (!adapter || site !== job.site) return { status: "error", detail: "当前页和任务站点不一致", page_url: pageUrl };
   if (adapter.refuse) return { status: "error", detail: adapter.refuse, page_url: pageUrl };
+  if (!extensionAlive()) return { status: "error", detail: "扩展上下文已失效，这次不发送", page_url: pageUrl };
   if (adapter.login && adapter.login()) return { status: "login", detail: "页面停在登录或验证，没有点击发送", page_url: pageUrl };
-  if (sent.has(job.request_id)) return { status: "error", detail: "这个请求已经提交过，刷新后不会再点发送", page_url: pageUrl };
   if (job.action === "cancel") return { status: "cancelled", page_url: pageUrl };
   if (busy) return { status: "error", detail: "这个标签页正在处理上一条", page_url: pageUrl };
   busy = true;
@@ -273,10 +273,34 @@ async function runJob(job) {
 
 let pending = null;
 
+function extensionAlive() {
+  try {
+    return Boolean(chrome.runtime && chrome.runtime.id);
+  } catch {
+    return false;
+  }
+}
+
+function claimJob(id) {
+  if (!id) return true;
+  if (sent.has(id)) return false;
+  remember(id);
+  return true;
+}
+
 if (!globalThis.__roomBridge) {
 globalThis.__roomBridge = true;
+const bridgeToken = {};
+globalThis.__roomBridgeToken = bridgeToken;
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (globalThis.__roomBridgeToken !== bridgeToken) return;
+  if (!extensionAlive()) return;
   if (!message || message.type !== "run") return;
+  const requestId = message.job && message.job.request_id;
+  if (requestId && !claimJob(requestId)) {
+    sendResponse({ status: "error", detail: "这个请求已经提交过，刷新后不会再点发送", page_url: location.origin + location.pathname });
+    return true;
+  }
   if (busy) {
     if (pending) pending.sendResponse({ status: "error", detail: "这个标签页只保留下一条，更早的排队已取消", page_url: location.origin + location.pathname });
     pending = { job: message.job, sendResponse };
