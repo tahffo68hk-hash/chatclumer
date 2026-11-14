@@ -120,7 +120,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       await fetch(`${BACKEND}/api/ext/jobs/progress`, {
         method: "POST",
         headers: { Authorization: `Bearer ${pairToken}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ request_id: message.request_id, phase: message.phase }),
+        body: JSON.stringify({ request_id: message.request_id, phase: message.phase, note: message.note || "" }),
       }).catch(() => {});
     });
     return;

@@ -212,6 +212,7 @@ class WebMemberIn(MemberIn):
 class ProgressIn(BaseModel):
     request_id: str
     phase: str
+    note: str = ""
 
 
 class JobResultIn(BaseModel):
@@ -420,7 +421,7 @@ def create_app(db_path: str | None = None, secrets_path: str | None = None, prov
         _require_ext(authorization)
         if body.phase not in {"filled", "waiting", "unsent", "timeout"}:
             raise HTTPException(400, "不认识的进度")
-        return bridge.note_progress(body.request_id, body.phase)
+        return bridge.note_progress(body.request_id, body.phase, body.note)
 
     @app.post("/api/ext/tabs")
     def ext_tabs(body: TabsIn, request: Request, authorization: str | None = Header(None)):

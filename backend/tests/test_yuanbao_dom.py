@@ -104,9 +104,10 @@ def test_yuanbao_reader_takes_only_the_new_ai_bubble():
         )
         login = page.evaluate(
             """() => {
-              const close = document.createElement("button");
-              close.className = "hyc-login__close";
-              document.body.appendChild(close);
+              const portal = document.createElement("div");
+              portal.className = "t-dialog__position";
+              portal.innerHTML = '<div class="t-dialog"><button class="hyc-login__close">关闭</button><div class="hyc-login__content">微信</div></div>';
+              document.body.appendChild(portal);
               return yuanbaoLogin(document);
             }"""
         )
@@ -154,7 +155,9 @@ def test_yuanbao_reader_takes_only_the_new_ai_bubble():
         browser.close()
     assert sent["ok"] is True
     assert quiet["ok"] is False
-    assert quiet["detail"] == "已填入，未发送"
+    assert quiet["detail"].startswith("已填入，未发送")
+    assert "待发长度" in quiet["detail"]
+    assert "不重复" in quiet["detail"]
 
 
 def test_editor_state_not_dom_text_enables_send_and_cards_are_not_clicked():
@@ -331,7 +334,9 @@ def test_editor_state_not_dom_text_enables_send_and_cards_are_not_clicked():
     assert counts["blank"] is False
     assert counts["model"] == "请用一句话给一个读书建议。"
     assert counts["writes"] == 1
-    assert quiet["detail"] == "已填入，未发送"
+    assert quiet["detail"].startswith("已填入，未发送")
+    assert "待发长度" in quiet["detail"]
+    assert "不重复" in quiet["detail"]
     assert cleared == ""
     assert again["ok"] is True
     assert entered["ok"] is True
@@ -509,3 +514,111 @@ def test_one_task_is_written_once_when_the_script_is_injected_twice():
     assert "读书建议" not in doubled["detail"]
     assert "重复" in doubled["detail"]
     assert "待发长度" in doubled["detail"]
+
+
+NEW_LAYOUT = """
+<div id="searchbar-editor"></div>
+<button class="agent-dialogue__tool__login" type="button">Log In</button>
+<div class="nick-info-name">Not logged in</div>
+<div id="searchbar-editor" class="yb-input-box-textarea agent-input-text-area">
+  <div id="search-bar">
+    <div class="chat-input-editor ql-container">
+      <div class="ql-editor" contenteditable="true" enterkeyhint="send" data-placeholder="Send Message"><p><br></p></div>
+    </div>
+  </div>
+  <div class="style__text-area__end___ow95N">
+    <div class="style__text-area__actions___S50n4">
+      <a id="yuanbao-send-btn" hidden>旧的</a>
+      <a id="yuanbao-send-btn" class="style__send-btn___RwTm5"><span class="icon-send">发送</span></a>
+    </div>
+  </div>
+</div>
+"""
+
+
+def test_new_yuanbao_layout_sends_and_login_gate_does_not_click():
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(channel="chrome", headless=True)
+        page = browser.new_page()
+        page.set_content(NEW_LAYOUT)
+        page.add_script_tag(path=str(ROOT / "extension" / "yuanbao.js"))
+        page.evaluate(
+            """() => {
+              window.__loginClicks = 0;
+              window.__sends = 0;
+              const send = [...document.querySelectorAll("#yuanbao-send-btn")].find((el) => el.classList.contains("style__send-btn___RwTm5"));
+              send.addEventListener("pointerdown", () => {
+                window.__sends += 1;
+                const row = document.createElement("div");
+                row.className = "agent-chat__list__item--human";
+                document.body.appendChild(row);
+              });
+            }"""
+        )
+        guest = page.evaluate(
+            """() => ({
+              blocked: yuanbaoLogin(document),
+              tag: yuanbaoSend(document).tagName,
+              klass: yuanbaoSend(document).className,
+              placeholder: yuanbaoComposer(document).getAttribute("data-placeholder"),
+            })"""
+        )
+        sent = page.evaluate(
+            """() => yuanbaoDispatchSend(document, "请用一句话给一个读书建议。", 800)"""
+        )
+        gated = page.evaluate(
+            """() => {
+              document.querySelector(".ql-editor").setAttribute("data-placeholder", "Please log in before entering content");
+              const portal = document.createElement("div");
+              portal.className = "t-portal-wrapper";
+              portal.innerHTML = '<div class="t-dialog__position t-dialog--center"><div class="t-dialog"><button class="hyc-login__close">关闭</button><div class="hyc-login__content">WeChat Phone QQ</div></div></div>';
+              document.body.appendChild(portal);
+              portal.querySelector(".hyc-login__close").addEventListener("click", () => { window.__loginClicks += 1; });
+              portal.querySelector(".hyc-login__content").addEventListener("click", () => { window.__loginClicks += 1; });
+              const blocked = yuanbaoLogin(document);
+              const result = yuanbaoDispatchSend(document, "请用一句话给一个读书建议。", 400);
+              return result.then((detail) => ({
+                blocked,
+                detail: detail.detail,
+                clicked: detail.clicked,
+                loginClicks: window.__loginClicks,
+                stillOpen: !!document.querySelector(".t-dialog__position .hyc-login__content"),
+                sends: window.__sends,
+              }));
+            }"""
+        )
+        header_only = page.evaluate(
+            """() => {
+              document.querySelector(".t-portal-wrapper").remove();
+              document.querySelector(".ql-editor").setAttribute("data-placeholder", "Send Message");
+              const header = yuanbaoLogin(document);
+              document.querySelector(".ql-editor").setAttribute("data-placeholder", "请登录后输入内容");
+              const chinese = yuanbaoLogin(document);
+              document.querySelector(".ql-editor").setAttribute("data-placeholder", "Send Message");
+              const panel = document.createElement("div");
+              panel.className = "geetest_panel";
+              panel.textContent = "验证";
+              panel.style.display = "none";
+              document.body.appendChild(panel);
+              const hiddenCaptcha = yuanbaoLogin(document);
+              panel.style.display = "block";
+              const shownCaptcha = yuanbaoLogin(document);
+              return { header, chinese, hiddenCaptcha, shownCaptcha };
+            }"""
+        )
+        browser.close()
+    assert guest["blocked"] is False
+    assert guest["tag"] == "A"
+    assert "style__send-btn" in guest["klass"]
+    assert guest["placeholder"] == "Send Message"
+    assert sent["ok"] is True
+    assert gated["blocked"] is True
+    assert gated["detail"] == "元宝需要登录（游客输入已被关闭），请在该标签页登录一次后重试"
+    assert gated["clicked"] is False
+    assert gated["loginClicks"] == 0
+    assert gated["stillOpen"] is True
+    assert gated["sends"] == 1
+    assert header_only["header"] is False
+    assert header_only["chinese"] is True
+    assert header_only["hiddenCaptcha"] is False
+    assert header_only["shownCaptcha"] is True

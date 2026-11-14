@@ -60,6 +60,7 @@ const adapters = {
     openNew: () => null,
     onlyNew: true,
     login: () => typeof yuanbaoLogin === "function" && yuanbaoLogin(document),
+    loginDetail: () => (typeof yuanbaoLoginDetail === "function" ? yuanbaoLoginDetail() : "页面停在登录或验证，没有点击发送"),
   },
   zhipu: {
     composer: () => null,
@@ -93,7 +94,10 @@ async function waitNew(adapter, before, signal) {
     if (signal.cancelled) return cancelResult();
     if (adapter.login && adapter.login()) {
       clickSiteStop();
-      return { status: "login", detail: "等待回复时页面停在登录，已停止，没有读取旧消息" };
+      const detail = typeof adapter.loginDetail === "function"
+        ? adapter.loginDetail()
+        : "等待回复时页面停在登录，已停止，没有读取旧消息";
+      return { status: "login", detail };
     }
     const nodes = adapter.assistants();
     const fresh = adapter.onlyNew
@@ -166,9 +170,9 @@ function clearIfUnsent(box, prompt) {
   box.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
-function reportPhase(job, phase) {
+function reportPhase(job, phase, note) {
   try {
-    chrome.runtime.sendMessage({ type: "job-progress", request_id: job.request_id, phase });
+    chrome.runtime.sendMessage({ type: "job-progress", request_id: job.request_id, phase, note: note || "" });
   } catch {
     /* 进度失败不改变发送结果 */
   }
@@ -203,7 +207,10 @@ async function runJob(job) {
   if (!adapter || site !== job.site) return { status: "error", detail: "当前页和任务站点不一致", page_url: pageUrl };
   if (adapter.refuse) return { status: "error", detail: adapter.refuse, page_url: pageUrl };
   if (!extensionAlive()) return { status: "error", detail: "扩展上下文已失效，这次不发送", page_url: pageUrl };
-  if (adapter.login && adapter.login()) return { status: "login", detail: "页面停在登录或验证，没有点击发送", page_url: pageUrl };
+  if (adapter.login && adapter.login()) {
+    const detail = typeof adapter.loginDetail === "function" ? adapter.loginDetail() : "页面停在登录或验证，没有点击发送";
+    return { status: "login", detail, page_url: pageUrl };
+  }
   if (job.action === "cancel") return { status: "cancelled", page_url: pageUrl };
   if (busy) return { status: "error", detail: "这个标签页正在处理上一条", page_url: pageUrl };
   busy = true;
@@ -234,8 +241,11 @@ async function runJob(job) {
         return { ...cancelResult(), page_url: pageUrl };
       }
       if (!outcome.ok) {
+        if (String(outcome.detail || "").includes("元宝需要登录")) {
+          return { status: "login", detail: outcome.detail, page_url: pageUrl };
+        }
         clearIfUnsent(box, job.prompt);
-        reportPhase(job, "unsent");
+        reportPhase(job, "unsent", outcome.detail);
         return { status: "error", detail: outcome.detail, page_url: pageUrl };
       }
       posted = true;

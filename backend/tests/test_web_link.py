@@ -119,3 +119,11 @@ def test_unbound_tab_does_not_send_and_progress_replaces_the_waiting_line(tmp_pa
     updated = app.state.db.get_message(message["id"])
     assert updated["content"] == "已填入，未发送"
     assert updated["status"] == "streaming"
+    noted = client.post(
+        "/api/ext/jobs/progress",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"request_id": "job-progress", "phase": "unsent", "note": "已填入，未发送。待发长度 16，实际长度 32，重复"},
+    )
+    assert noted.status_code == 200
+    diagnosed = app.state.db.get_message(message["id"])
+    assert diagnosed["content"] == "已填入，未发送。待发长度 16，实际长度 32，重复"

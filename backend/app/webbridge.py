@@ -36,19 +36,19 @@ SITE_STATUS = {
     },
     "chatgpt": {"state": "BLOCKED", "detail": "本环境早前打开 https://chatgpt.com/ 停在挑战页。没有重试，没有绕过。"},
     "claude": {"state": "BLOCKED", "detail": "本环境早前打开 https://claude.ai/ 得到 403。没有重试，没有绕过。"},
-    "deepseek": {"state": "BLOCKED", "detail": "本环境早前打开 https://chat.deepseek.com/ 得到 CloudFront 403。没有重试，没有绕过。"},
+    "deepseek": {"state": "BLOCKED", "detail": "DeepSeek 需要登录后的标签页。本环境早前打开 https://chat.deepseek.com/ 得到 CloudFront 403。没有重试，没有绕过。"},
     "grok": {"state": "login_wall", "detail": "本环境早前打开 https://grok.com/ 先是登录与 Cookie 说明，没有当成游客聊天。"},
     "doubao": {
         "state": "UNVERIFIED",
-        "detail": "允许逐站授权 https://www.doubao.com/chat/ 。协调方看到登录后才有回复。本机还没有核验输入框，不会发送，也不写成永远没有游客。",
+        "detail": "豆包需要登录后才有回复。本机还没有核验输入框，不会发送。",
     },
     "yuanbao": {
-        "state": "coordinator_dom_not_e2e",
-        "detail": "结构取自协调方实页 2026-11-15。受控自动发送只在已绑定且无登录层时点击 Send 或回车，并要看到新增的用户气泡。等待协调方实页验收，不是扩展端到端。",
+        "state": "guest_login_required",
+        "detail": "2026-11-15 起元宝游客输入被关闭。请先在该标签页登录一次。扩展看到登录弹窗或登录占位符就停止，不会关弹窗，也不会点登录。登录后的实页发送仍待验收。",
     },
     "zhipu": {
-        "state": "login_wall",
-        "detail": "2026-11-15 01:40 CST 本机打开 https://chatglm.cn/ 停在手机号登录。公开回复正文位置未验证，扩展不会发送，也不用整页文字代替。页面标签 GLM-5.3-Flash极致 不是精确底层 ID。",
+        "state": "guest_no_autosend",
+        "detail": "智谱游客页可以人工使用。扩展不自动点击发送，公开回复正文位置未验证，也不用整页文字代替。",
     },
 }
 
@@ -126,12 +126,12 @@ class WebBridge:
             ).fetchone()
         return row is not None
 
-    def note_progress(self, request_id: str, phase: str) -> dict:
+    def note_progress(self, request_id: str, phase: str, note: str = "") -> dict:
         job = self.get_job(request_id)
         if not job or job["status"] not in {"queued", "sending"}:
             return {"ok": False}
         if self.on_progress:
-            self.on_progress(job, phase)
+            self.on_progress(job, phase, note or "")
         return {"ok": True}
 
     def note_tabs(self, tabs: list[dict]) -> dict:

@@ -75,10 +75,13 @@ class RoomEngine:
             "timeout": "超时",
         }
 
-        def publish(job: dict, phase: str) -> None:
+        def publish(job: dict, phase: str, note: str = "") -> None:
             text = labels.get(phase)
             if not text:
                 return
+            cleaned = " ".join((note or "").split())[:180]
+            if phase == "unsent" and cleaned.startswith("已填入，未发送") and "待发长度" in cleaned:
+                text = cleaned
             for message in reversed(self.db.list_messages(job["session_id"])):
                 if message.get("member_id") == job.get("member_id") and message.get("status") == "streaming":
                     updated = self.db.update_message(message["id"], content=text)

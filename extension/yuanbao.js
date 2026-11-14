@@ -1,10 +1,25 @@
 // 结构取自协调方实页 2026-11-15。本文件不是那次桌面验收，不能当成扩展端到端已通过。
 const YUANBAO_DOM_SOURCE = "结构取自协调方实页 2026-11-15";
 
+const YUANBAO_LOGIN_DETAIL = "元宝需要登录（游客输入已被关闭），请在该标签页登录一次后重试";
+
+function yuanbaoVisible(el) {
+  if (!el || el.hidden) return false;
+  const view = el.ownerDocument && el.ownerDocument.defaultView;
+  const style = view && view.getComputedStyle ? view.getComputedStyle(el) : null;
+  if (style && (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0)) return false;
+  return el.getClientRects().length > 0;
+}
+
 function yuanbaoComposer(root) {
-  return root.querySelector("[contenteditable='true'][data-placeholder='Send Message']")
-    || root.querySelector("[contenteditable='true'][data-placeholder='发消息']")
-    || root.querySelector(".ql-editor[contenteditable='true']");
+  const nodes = [
+    ...root.querySelectorAll("#searchbar-editor .ql-editor[contenteditable='true']"),
+    ...root.querySelectorAll("[data-new-input-card] .ql-editor[contenteditable='true']"),
+    ...root.querySelectorAll("[contenteditable='true'][data-placeholder='Send Message']"),
+    ...root.querySelectorAll("[contenteditable='true'][data-placeholder='发消息']"),
+    ...root.querySelectorAll(".ql-editor[contenteditable='true']"),
+  ];
+  return nodes.find((el) => yuanbaoVisible(el)) || nodes[0] || null;
 }
 
 function yuanbaoControl(root, labels) {
@@ -24,10 +39,13 @@ function yuanbaoNormalize(value) {
 
 function yuanbaoSendIn(scope) {
   if (!scope) return null;
-  const byId = scope.querySelector("#yuanbao-send-btn");
-  if (byId && !byId.hidden && !byId.closest("[data-recommend]")) return byId;
+  const nodes = [...scope.querySelectorAll("#yuanbao-send-btn")].filter((el) => !el.closest("[data-recommend]"));
+  const classed = nodes.filter((el) => el.classList.length && yuanbaoVisible(el));
+  if (classed[0]) return classed[0];
+  const visible = nodes.filter((el) => yuanbaoVisible(el));
+  if (visible[0]) return visible[0];
   const labeled = [...scope.querySelectorAll("[data-new-input-control='send'] [aria-label='Send'], [data-new-input-control='send'] [aria-label='发送']")].find((el) => {
-    return !el.hidden && !el.closest("[data-recommend]");
+    return yuanbaoVisible(el) && !el.closest("[data-recommend]");
   });
   return labeled || null;
 }
@@ -35,7 +53,7 @@ function yuanbaoSendIn(scope) {
 function yuanbaoSend(root) {
   const composer = yuanbaoComposer(root);
   if (!composer) return null;
-  const card = composer.closest("[data-new-input-card]");
+  const card = composer.closest("[data-new-input-card]") || composer.closest("#searchbar-editor");
   if (card) return yuanbaoSendIn(card);
   let node = composer.parentElement;
   while (node && node !== root.parentElement) {
@@ -67,7 +85,7 @@ function yuanbaoComposerText(node) {
 }
 
 function yuanbaoSendBlocked(el) {
-  if (!el || el.hidden || el.disabled || el.getAttribute("aria-disabled") === "true") return true;
+  if (!el || !yuanbaoVisible(el) || el.disabled || el.getAttribute("aria-disabled") === "true") return true;
   return [...el.classList].some((name) => name.startsWith("SendButton_disabled") || name.startsWith("SendButton_sendNot"));
 }
 
@@ -195,7 +213,7 @@ async function yuanbaoCommitPrompt(root, prompt, shouldAbort) {
 async function yuanbaoDispatchSend(root, prompt, timeoutMs, shouldAbort) {
   const deadline = Date.now() + (timeoutMs == null ? 10000 : timeoutMs);
   if (shouldAbort && shouldAbort()) return { ok: false, detail: "cancelled", clicked: false };
-  if (yuanbaoLogin(root)) return { ok: false, detail: "页面停在登录或验证，没有点击发送", clicked: false };
+  if (yuanbaoLogin(root)) return { ok: false, detail: yuanbaoLoginDetail(), clicked: false };
   const composer = yuanbaoComposer(root);
   if (!composer) return { ok: false, detail: "找不到输入框", clicked: false };
   const committed = await yuanbaoCommitPrompt(root, prompt, shouldAbort);
@@ -232,7 +250,10 @@ async function yuanbaoDispatchSend(root, prompt, timeoutMs, shouldAbort) {
     }
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  const detail = clicked || matched ? "已填入，未发送" : "输入框内容和待发文本不一致，没有点击发送";
+  const note = yuanbaoDiagnosis(composer, prompt);
+  const detail = clicked || yuanbaoSame(composer, prompt)
+    ? `已填入，未发送。${note}`
+    : `输入框内容和待发文本不一致，没有点击发送。${note}`;
   if (!clicked || yuanbaoHumans(root).length === before) yuanbaoClearComposer(composer);
   return { ok: false, detail, clicked };
 }
@@ -255,10 +276,18 @@ function yuanbaoDone(node) {
   return !!(finished && toolbar);
 }
 
+function yuanbaoLoginDetail() {
+  return YUANBAO_LOGIN_DETAIL;
+}
+
 function yuanbaoLogin(root) {
-  const overlay = root.querySelector(".hyc-login__close");
-  if (overlay && !overlay.hidden) return true;
-  const text = root.body ? root.body.innerText || "" : "";
-  if (!/Log In with WeChat|微信登录|请输入手机号/.test(text)) return false;
-  return !yuanbaoComposer(root);
+  const scope = root && root.querySelector ? root : document;
+  const dialog = [...scope.querySelectorAll(".t-dialog__position")].find((box) => {
+    return yuanbaoVisible(box) && box.querySelector(".hyc-login__content, .hyc-login__close");
+  });
+  if (dialog) return true;
+  const composer = yuanbaoComposer(scope);
+  const placeholder = composer ? composer.getAttribute("data-placeholder") || "" : "";
+  if (/log ?in|登录/i.test(placeholder)) return true;
+  return [...scope.querySelectorAll("#tcaptcha_iframe, .tcaptcha-transform, .geetest_panel")].some((el) => yuanbaoVisible(el));
 }
