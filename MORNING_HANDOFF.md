@@ -199,13 +199,13 @@ git status --short
 
 分组和网页桥提交后，用下面的命令核对。若其后只有记下哈希的修订，以 `git rev-parse HEAD` 为准，并确认功能提交仍是祖先。
 
-元宝 div 发送控件在：
+元宝只写一次在：
+
+`0a4b93523deea8efc513fae858304b8b82b33663`
+
+元宝 div 发送控件仍是祖先：
 
 `776bb15e180858ae7275de37894e041d46ac51bd`
-
-元宝编辑器写入仍是祖先：
-
-`427add8e41d93131adcfcf70b3c1d52e2db78632`
 
 上一包仍是祖先：
 
@@ -224,7 +224,7 @@ git status --short
 ```bash
 git rev-parse HEAD
 git log -1 --oneline
-git merge-base --is-ancestor 776bb15e180858ae7275de37894e041d46ac51bd HEAD && echo ancestor-ok
+git merge-base --is-ancestor 0a4b93523deea8efc513fae858304b8b82b33663 HEAD && echo ancestor-ok
 git status --short
 ```
 
