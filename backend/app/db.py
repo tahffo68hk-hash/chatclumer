@@ -46,6 +46,8 @@ class Database:
               max_cost_usd REAL,
               summary_mode TEXT NOT NULL,
               summary_member_id TEXT,
+              summary_provider TEXT,
+              summary_model_id TEXT,
               cross_delay_ms INTEGER NOT NULL,
               room_rule TEXT NOT NULL,
               stop_on_no_new_point INTEGER NOT NULL,
@@ -132,6 +134,11 @@ class Database:
             );
             """
         )
+        cols = {row[1] for row in self.conn.execute("PRAGMA table_info(sessions)")}
+        if "summary_provider" not in cols:
+            self.conn.execute("ALTER TABLE sessions ADD COLUMN summary_provider TEXT")
+        if "summary_model_id" not in cols:
+            self.conn.execute("ALTER TABLE sessions ADD COLUMN summary_model_id TEXT")
         self.conn.commit()
 
     def _one(self, sql: str, params: tuple = ()) -> dict | None:
@@ -163,9 +170,9 @@ class Database:
                 """
                 INSERT INTO sessions (
                   id, title, status, mode, max_rounds, max_ai_messages, max_seconds,
-                  max_tokens, max_cost_usd, summary_mode, summary_member_id, cross_delay_ms,
-                  room_rule, stop_on_no_new_point, created_at, updated_at
-                ) VALUES (?, ?, 'idle', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  max_tokens, max_cost_usd, summary_mode, summary_member_id, summary_provider, summary_model_id,
+                  cross_delay_ms, room_rule, stop_on_no_new_point, created_at, updated_at
+                ) VALUES (?, ?, 'idle', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     sid,
@@ -178,6 +185,8 @@ class Database:
                     fields.get("max_cost_usd"),
                     fields.get("summary_mode") or "local",
                     fields.get("summary_member_id"),
+                    fields.get("summary_provider"),
+                    fields.get("summary_model_id"),
                     int(fields.get("cross_delay_ms", 120)),
                     fields.get("room_rule") or "",
                     1 if fields.get("stop_on_no_new_point", True) else 0,
@@ -216,6 +225,8 @@ class Database:
             "max_cost_usd",
             "summary_mode",
             "summary_member_id",
+            "summary_provider",
+            "summary_model_id",
             "cross_delay_ms",
             "room_rule",
             "stop_on_no_new_point",

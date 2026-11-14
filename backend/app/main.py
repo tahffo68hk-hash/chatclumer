@@ -73,6 +73,8 @@ class SessionIn(BaseModel):
     max_cost_usd: float | None = None
     summary_mode: str = "local"
     summary_member_id: str | None = None
+    summary_provider: str | None = None
+    summary_model_id: str | None = None
     cross_delay_ms: int = 120
     room_rule: str = ""
     stop_on_no_new_point: bool = True
@@ -88,6 +90,8 @@ class SettingsIn(BaseModel):
     max_cost_usd: float | None = None
     summary_mode: str | None = None
     summary_member_id: str | None = None
+    summary_provider: str | None = None
+    summary_model_id: str | None = None
     cross_delay_ms: int | None = None
     room_rule: str | None = None
     stop_on_no_new_point: bool | None = None
@@ -143,8 +147,18 @@ def _check_limits(data: dict) -> None:
         raise HTTPException(400, "token 上限至少为 1")
     if data.get("max_cost_usd") is not None and float(data["max_cost_usd"]) < 0:
         raise HTTPException(400, "费用上限不能为负")
-    if "summary_mode" in data and data["summary_mode"] not in {None, "local", "member"}:
-        raise HTTPException(400, "总结方式只能是本地回顾或指定成员")
+    if "summary_mode" in data and data["summary_mode"] not in {None, "local", "member", "provider"}:
+        raise HTTPException(400, "总结方式只能是本地回顾、指定成员或指定总结模型")
+    if data.get("summary_mode") == "provider":
+        provider = (data.get("summary_provider") or "").strip()
+        model_id = (data.get("summary_model_id") or "").strip()
+        if provider not in PROVIDERS:
+            raise HTTPException(400, "总结模型的提供方不支持")
+        if provider == "demo":
+            if not DEMO_MODEL.match(model_id):
+                raise HTTPException(400, "演示总结的模型 ID 必须以 demo- 开头")
+        elif not model_id or model_id.startswith("demo-"):
+            raise HTTPException(400, "总结模型需要精确 model ID，不能用 demo- 伪装")
     if "cross_delay_ms" in data and data["cross_delay_ms"] is not None and not 0 <= int(data["cross_delay_ms"]) <= 5000:
         raise HTTPException(400, "发言间隔需在 0 到 5000 毫秒")
 

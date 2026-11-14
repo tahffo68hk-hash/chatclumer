@@ -17,9 +17,17 @@ LIMITS = {"limit_messages", "limit_tokens", "limit_cost", "limit_time", "limit_r
 HARD_STOP_SUMMARY = {"user_stop", "limit_time", "server_restart", "provider_failed", "engine_error"}
 
 
+def wants_model_summary(session: dict) -> bool:
+    if session.get("summary_mode") == "member" and session.get("summary_member_id"):
+        return True
+    if session.get("summary_mode") == "provider" and session.get("summary_provider") and session.get("summary_model_id"):
+        return True
+    return False
+
+
 def discussion_cap(session: dict) -> int:
     cap = int(session["max_ai_messages"])
-    if session.get("summary_mode") == "member" and session.get("summary_member_id") and cap >= 2:
+    if wants_model_summary(session) and cap >= 2:
         return cap - 1
     return cap
 
@@ -822,18 +830,18 @@ class RoomEngine:
         session = self.db.get_session(session_id)
         if not session or session.get("run_token") != run_token:
             return
-        if not (session["status"] in {"finished", "stopped", "failed"} and session.get("end_reason")):
-            if reason in {"independent_complete", "ok"} and not self.db.complete_ai_in_run(session_id, run_token):
-                errors = [
-                    item
-                    for item in self.db.list_messages(session_id)
-                    if item.get("run_token") == run_token and item["status"] == "error"
-                ]
-                if errors:
-                    reason = "provider_failed"
-            self.db.finish_session(session_id, run_token, status_for(reason), reason)
-        session = self.db.get_session(session_id)
+        already_closed = session["status"] in {"finished", "stopped", "failed"} and session.get("end_reason")
+        if not already_closed and reason in {"independent_complete", "ok"} and not self.db.complete_ai_in_run(session_id, run_token):
+            errors = [
+                item
+                for item in self.db.list_messages(session_id)
+                if item.get("run_token") == run_token and item["status"] == "error"
+            ]
+            if errors:
+                reason = "provider_failed"
         await self._emit_summary(session_id, run_token, session.get("end_reason") or reason, cancel)
+        if not already_closed:
+            self.db.finish_session(session_id, run_token, status_for(reason), reason)
         final = self.db.get_session(session_id)
         self.db.finish_run_row(run_token, final["status"], final.get("end_reason"))
         self.db.set_speaking(session_id, "", False)
@@ -845,42 +853,106 @@ class RoomEngine:
         session = self.db.get_session(session_id)
         if not session:
             return
-        if self._model_summary_allowed(session, reason, cancel, session_id):
-            member = self.db.get_member(session["summary_member_id"])
-            if member and member["enabled"] and member["session_id"] == session_id:
-                code = await self._speak(
-                    session_id,
-                    run_token,
-                    cancel,
-                    member,
-                    [member],
-                    "summary",
-                    int(session["current_round"] or 0),
-                    int(session["context_version"]),
-                    int(session["max_ai_messages"]),
-                    self.db.model_transcript(session_id),
-                )
-                if code in {"ok", "ok_repeat"} or self.db.has_summary(run_token):
-                    self._normalize_summary(session_id, run_token, reason)
-                    self.publish_state(session_id)
-                    return
-        self._write_local_summary(session_id, run_token, reason, "")
+        target = self._summary_target(session)
+        allowed, why = self._model_summary_allowed(session, reason, cancel, session_id)
+        if target and allowed:
+            blocked = self._summary_preflight(target, session)
+            if blocked:
+                self._write_local_summary(session_id, run_token, reason, blocked)
+                return
+            code = await self._speak(
+                session_id,
+                run_token,
+                cancel,
+                target,
+                [target],
+                "summary",
+                int(session["current_round"] or 0),
+                int(session["context_version"]),
+                int(session["max_ai_messages"]),
+                self.db.model_transcript(session_id),
+            )
+            if code in {"ok", "ok_repeat"} or self.db.has_summary(run_token):
+                self._normalize_summary(session_id, run_token, reason)
+                self.publish_state(session_id)
+                return
+            why = why or "总结模型没有返回可用的六段综述，未再请求。"
+        self._write_local_summary(session_id, run_token, reason, "" if allowed else why)
 
-    def _model_summary_allowed(self, session: dict, reason: str, cancel: asyncio.Event, session_id: str) -> bool:
-        if session.get("summary_mode") != "member" or not session.get("summary_member_id"):
-            return False
-        if reason in HARD_STOP_SUMMARY or cancel.is_set():
-            return False
+    def _summary_target(self, session: dict) -> dict | None:
+        if session.get("summary_mode") == "member" and session.get("summary_member_id"):
+            member = self.db.get_member(session["summary_member_id"])
+            if member and member["enabled"] and member["session_id"] == session["id"]:
+                return member
+            return None
+        if session.get("summary_mode") != "provider":
+            return None
+        provider = (session.get("summary_provider") or "").strip()
+        model_id = (session.get("summary_model_id") or "").strip()
+        if not provider or not model_id:
+            return None
+        return {
+            "id": f"summary:{provider}",
+            "session_id": session["id"],
+            "nickname": "总结模型",
+            "role_name": "综合",
+            "persona": "只根据已经公开的发言写六段综述。不要编造记录里没有的共识。",
+            "provider": provider,
+            "model_id": model_id,
+            "api_base": None,
+            "api_key_env": None,
+            "enabled": True,
+            "avatar_color": "#44403c",
+        }
+
+    def _summary_preflight(self, member: dict, session: dict) -> str | None:
+        preflight = getattr(self.provider, "preflight", None)
+        if not preflight:
+            return None
+        request = GenRequest(
+            member_id=member["id"],
+            member_nickname=member["nickname"],
+            role_name=member["role_name"],
+            persona=member.get("persona") or "",
+            provider=member["provider"],
+            model_id=member["model_id"],
+            api_base=member.get("api_base"),
+            api_key_env=member.get("api_key_env"),
+            round_number=int(session.get("current_round") or 0),
+            phase="summary",
+            mode=session.get("mode") or "free_chat",
+            transcript=[],
+            user_latest="",
+            reply_to=None,
+            suggest_next_nickname=None,
+            room_rule=session.get("room_rule") or "",
+            cost_cap_set=session.get("max_cost_usd") is not None,
+            is_demo=member["provider"] == "demo",
+        )
+        error = preflight(request)
+        if not error:
+            return None
+        return f"总结模型未调用：{error} 下面仍是本地回顾。"
+
+    def _model_summary_allowed(self, session: dict, reason: str, cancel: asyncio.Event, session_id: str) -> tuple[bool, str]:
+        if not wants_model_summary(session):
+            return False, ""
+        if reason in HARD_STOP_SUMMARY or cancel.is_set() or session.get("status") == "stopped":
+            return False, "讨论已停止、超时或失败，未再请求总结模型。"
         deadline = self.deadlines.get(session_id)
         if deadline is not None and time.monotonic() >= deadline:
-            return False
+            return False, "时间上限已到，未再请求总结模型。"
+        if reason in {"limit_time", "limit_tokens", "limit_cost"}:
+            return False, "已经到达硬上限，未再请求总结模型。"
         if session["max_tokens"] is not None and session["run_tokens"] >= session["max_tokens"]:
-            return False
+            return False, "token 上限已到，未再请求总结模型。"
+        if session["max_cost_usd"] is not None and not int(session.get("run_cost_known") or 0):
+            return False, "费用未知，未再请求总结模型。"
         if session["max_cost_usd"] is not None and float(session["run_cost_usd"]) >= float(session["max_cost_usd"]) - 1e-9:
-            return False
+            return False, "费用上限已到，未再请求总结模型。"
         if session["ai_message_count"] >= session["max_ai_messages"]:
-            return False
-        return True
+            return False, "消息额度已用完，未再请求总结模型。"
+        return True, ""
 
     def _normalize_summary(self, session_id: str, run_token: str, reason: str) -> None:
         messages = [
@@ -892,12 +964,13 @@ class RoomEngine:
             return
         message = messages[-1]
         text = message["content"]
-        if "主要结论" in text and "分歧" in text and "下一步" in text:
+        headings = ("主要结论", "共识", "分歧", "未验证事实", "最推荐建议", "下一步行动")
+        if all(item in text for item in headings):
             return
         replacement = build_summary(
             self.db.model_transcript(session_id),
             reason,
-            note="成员输出没有完整六段结构，已改用本地回顾，没有再次请求。",
+            note="总结模型没有完整六段结构，已改用本地回顾，没有再次请求。",
         )
         self.db.update_message(message["id"], content=replacement, provider="local", model_id="local-retrospective", is_demo=False)
         self.publish(session_id, "message", self.db.get_message(message["id"]))

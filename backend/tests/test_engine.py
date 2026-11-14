@@ -341,6 +341,156 @@ async def test_paid_provider_without_permission_does_not_impersonate(tmp_path):
     assert text.startswith("【演示回复 · 非真实模型】")
 
 
+SIX = ("主要结论", "共识", "分歧", "未验证事实", "最推荐建议", "下一步行动")
+
+
+class SynthesisProvider:
+    def __init__(self):
+        self.calls = []
+
+    def preflight(self, req):
+        return None
+
+    async def stream(self, req, cancel, stale):
+        self.calls.append(req.phase)
+        if cancel.is_set() or stale.is_set():
+            return
+        if req.phase == "summary":
+            yield "\n".join(
+                [
+                    "## 主要结论",
+                    "综合后的结论。",
+                    "## 共识",
+                    "双方都接受先做小范围验证。",
+                    "## 分歧",
+                    "对是否立刻推广仍有分歧。",
+                    "## 未验证事实",
+                    "还没有外部数据。",
+                    "## 最推荐建议",
+                    "先做可观察的小实验。",
+                    "## 下一步行动",
+                    "由用户决定是否采纳。",
+                ]
+            )
+        else:
+            yield f"公开看法 {req.member_nickname}"
+
+
+@pytest.mark.asyncio
+async def test_provider_summary_is_one_six_part_synthesis(tmp_path):
+    provider = SynthesisProvider()
+    db, engine, room = make(
+        tmp_path,
+        provider,
+        mode="independent",
+        max_rounds=1,
+        max_ai_messages=4,
+        max_seconds=30,
+        summary_mode="provider",
+        summary_provider="openai",
+        summary_model_id="gpt-4o-mini",
+    )
+    add_member(db, room["id"], "甲")
+    add_member(db, room["id"], "乙", "工程师")
+    await engine.ingest_message(room["id"], "请综合")
+    session = await finish(engine, room["id"])
+    reports = summaries(db, room["id"])
+    assert provider.calls.count("summary") == 1
+    assert session["ai_message_count"] <= 4
+    assert len(reports) == 1
+    report = reports[0]
+    assert report["provider"] == "openai"
+    assert report["model_id"] == "gpt-4o-mini"
+    assert report["is_demo"] is False
+    assert "【本地回顾" not in report["content"]
+    assert "【演示" not in report["content"]
+    for heading in SIX:
+        assert heading in report["content"]
+    await asyncio.sleep(0.2)
+    assert provider.calls.count("summary") == 1
+    assert len(summaries(db, room["id"])) == 1
+
+
+@pytest.mark.asyncio
+async def test_summary_stays_local_when_stopped_or_unbudgeted_or_unkeyed(tmp_path):
+    provider = GateProvider()
+    db, engine, room = make(
+        tmp_path,
+        provider,
+        mode="free_chat",
+        max_rounds=3,
+        max_ai_messages=6,
+        max_seconds=30,
+        summary_mode="provider",
+        summary_provider="openai",
+        summary_model_id="gpt-4o-mini",
+    )
+    add_member(db, room["id"], "甲")
+    await engine.ingest_message(room["id"], "停")
+    await slot(provider, 0)
+    await engine.stop(room["id"])
+    session = await finish(engine, room["id"])
+    assert session["status"] == "stopped"
+    assert all(phase != "summary" for phase in [item["req"].phase for item in provider.order])
+    report = summaries(db, room["id"])[0]
+    assert report["provider"] == "local"
+    assert "本地回顾" in report["content"]
+    assert "未再请求总结模型" in report["content"]
+
+    cheap = SynthesisProvider()
+    db, engine, room = make(
+        tmp_path,
+        cheap,
+        mode="independent",
+        max_rounds=1,
+        max_ai_messages=2,
+        max_tokens=1,
+        max_seconds=30,
+        summary_mode="provider",
+        summary_provider="openai",
+        summary_model_id="gpt-4o-mini",
+    )
+    add_member(db, room["id"], "甲")
+    add_member(db, room["id"], "乙", "工程师")
+    await engine.ingest_message(room["id"], "预算")
+    session = await finish(engine, room["id"])
+    assert cheap.calls == []
+    assert session["ai_message_count"] == 0
+    assert session["end_reason"] == "limit_tokens"
+    local = summaries(db, room["id"])
+    assert len(local) == 1
+    assert local[0]["model_id"] == "local-retrospective"
+    assert "未再请求总结模型" in local[0]["content"]
+
+    secrets = SecretStore(str(tmp_path / "empty-secrets.json"))
+    def refuse_network():
+        raise AssertionError("should not dial")
+
+    routed = RoutedProvider(secrets, client_factory=refuse_network)
+    db, engine, room = make(
+        tmp_path,
+        routed,
+        mode="independent",
+        max_rounds=1,
+        max_ai_messages=4,
+        max_seconds=30,
+        summary_mode="provider",
+        summary_provider="anthropic",
+        summary_model_id="claude-sonnet-4-5",
+    )
+    add_member(db, room["id"], "甲")
+    await engine.ingest_message(room["id"], "无密钥")
+    session = await finish(engine, room["id"])
+    assert routed.network_calls == 0
+    assert session["status"] == "finished"
+    report = summaries(db, room["id"])[0]
+    assert report["provider"] == "local"
+    assert report["model_id"] == "local-retrospective"
+    assert "本地回顾" in report["content"]
+    assert "未调用" in report["content"]
+    assert "伪装" in report["content"]
+
+
 def test_summary_mentions_disagreement():
     text = build_summary(
         [

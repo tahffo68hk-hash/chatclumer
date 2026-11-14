@@ -11,6 +11,8 @@ export type Session = {
   max_cost_usd: number | null;
   summary_mode: string;
   summary_member_id: string | null;
+  summary_provider?: string | null;
+  summary_model_id?: string | null;
   cross_delay_ms: number;
   room_rule: string;
   stop_on_no_new_point: boolean;

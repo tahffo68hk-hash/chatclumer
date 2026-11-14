@@ -89,6 +89,8 @@ export function ChatApp() {
     room_rule: "",
     summary_mode: "local",
     summary_member_id: "",
+    summary_provider: "openai",
+    summary_model_id: "",
     stop_on_no_new_point: true,
   });
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -115,6 +117,8 @@ export function ChatApp() {
       room_rule: detail.session.room_rule || "",
       summary_mode: detail.session.summary_mode,
       summary_member_id: detail.session.summary_member_id || "",
+      summary_provider: detail.session.summary_provider || "openai",
+      summary_model_id: detail.session.summary_model_id || "",
       stop_on_no_new_point: detail.session.stop_on_no_new_point,
     });
   }, []);
@@ -258,6 +262,8 @@ export function ChatApp() {
         room_rule: settings.room_rule,
         summary_mode: settings.summary_mode,
         summary_member_id: settings.summary_mode === "member" ? settings.summary_member_id || null : null,
+        summary_provider: settings.summary_mode === "provider" ? settings.summary_provider : null,
+        summary_model_id: settings.summary_mode === "provider" ? settings.summary_model_id.trim() : null,
         stop_on_no_new_point: settings.stop_on_no_new_point,
       });
       await loadRoom(currentId);
@@ -549,20 +555,49 @@ export function ChatApp() {
                 <select
                   className="h-9 w-full rounded-lg border bg-white px-2 text-sm"
                   disabled={!!busy}
-                  value={settings.summary_mode === "member" ? settings.summary_member_id : "local"}
+                  value={settings.summary_mode === "member" ? settings.summary_member_id : settings.summary_mode}
                   onChange={(event) => {
                     const value = event.target.value;
                     if (value === "local") setSettings({ ...settings, summary_mode: "local", summary_member_id: "" });
+                    else if (value === "provider") setSettings({ ...settings, summary_mode: "provider", summary_member_id: "" });
                     else setSettings({ ...settings, summary_mode: "member", summary_member_id: value });
                   }}
                 >
                   <option value="local">本地回顾，不额外请求模型</option>
+                  <option value="provider">指定总结模型（占用 1 条额度）</option>
                   {members.map((member) => (
                     <option key={member.id} value={member.id}>
                       由 {member.nickname} 总结（占用 1 条额度）
                     </option>
                   ))}
                 </select>
+                {settings.summary_mode === "provider" && (
+                  <div className="grid gap-2">
+                    <select
+                      data-testid="summary-provider"
+                      className="h-9 w-full rounded-lg border bg-white px-2 text-sm"
+                      disabled={!!busy}
+                      value={settings.summary_provider}
+                      onChange={(event) => setSettings({ ...settings, summary_provider: event.target.value })}
+                    >
+                      {catalog.map((item) => (
+                        <option key={item.provider} value={item.provider}>
+                          {item.label}
+                        </option>
+                      ))}
+                    </select>
+                    <Input
+                      data-testid="summary-model"
+                      disabled={!!busy}
+                      value={settings.summary_model_id}
+                      placeholder="精确 model ID"
+                      onChange={(event) => setSettings({ ...settings, summary_model_id: event.target.value })}
+                    />
+                    <p className="text-[11px] leading-5 text-[#6b6258]">
+                      有密钥且额度和时间还够时，才请求这个模型写六段综合。无密钥、已停止或预算不够时，仍标明本地回顾，不会伪装成该模型。
+                    </p>
+                  </div>
+                )}
                 <Button data-testid="save-limits" variant="secondary" disabled={!!busy} onClick={() => void saveSettings()}>
                   保存上限
                 </Button>
@@ -844,7 +879,9 @@ function MessageRow({ message, reply, onReply }: { message: ChatMessage; reply?:
             {message.role_name && <span className="text-xs text-[#6b6258]">{message.role_name}</span>}
             {message.is_demo && <Badge variant="outline">演示</Badge>}
             {message.is_summary && (
-              <Badge>{message.provider === "local" ? "本地回顾" : "成员总结"}</Badge>
+              <Badge>
+                {message.provider === "local" ? "本地回顾" : message.is_demo ? "演示总结" : "模型综合"}
+              </Badge>
             )}
             {message.status === "streaming" && <Badge variant="secondary">正在说</Badge>}
             {message.status === "error" && <Badge variant="destructive">失败</Badge>}
