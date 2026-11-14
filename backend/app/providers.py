@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import json
 import os
+import unicodedata
 from dataclasses import dataclass, field
 from typing import AsyncIterator
 from urllib.parse import urlparse
@@ -143,22 +144,39 @@ def render_prompt(req: GenRequest) -> str:
     return "\n".join(lines)
 
 
+def flat_forward(text: str, limit: int = 800) -> str:
+    """One paragraph for a web composer. Quill splits on newlines."""
+    flat = unicodedata.normalize("NFKC", text or "")
+    for mark in ("\u200b", "\u200c", "\u200d", "\ufeff"):
+        flat = flat.replace(mark, "")
+    flat = " ".join(flat.replace("\u00a0", " ").split())
+    chars = list(flat)
+    suffix = "…（已截断）"
+    if len(chars) <= limit:
+        return flat
+    room = max(0, limit - len(suffix))
+    return "".join(chars[:room]) + suffix
+
+
 def web_forward_text(req: GenRequest) -> str:
     """Text typed into the site. No hidden prompt, no other groups."""
     if req.phase == "cross" and req.reply_to:
         nick = req.reply_to.get("nickname") or "另一位"
-        quote = excerpt(req.reply_to.get("content") or "", 500)
-        return f"{nick} 的公开答复：{quote}\n请只根据这句公开答复补充或质疑。"
-    markers = [
-        item
-        for item in req.transcript
-        if item.get("author_type") == "user" or item.get("event_kind") in {"merge", "split", "share"}
-    ]
-    latest = markers[-1] if markers else None
-    if latest and latest.get("event_kind") in {"merge", "share"}:
-        quote = excerpt(latest.get("content") or "", 700)
-        return "下面只转发被选中的公开答复。请根据这段补充或质疑，不要重复上一问。\n" + quote
-    return req.user_latest or ""
+        quote = excerpt(req.reply_to.get("content") or "", 700)
+        body = f"{nick} 的公开答复：{quote} 请只根据这句公开答复补充或质疑。"
+    else:
+        markers = [
+            item
+            for item in req.transcript
+            if item.get("author_type") == "user" or item.get("event_kind") in {"merge", "split", "share"}
+        ]
+        latest = markers[-1] if markers else None
+        if latest and latest.get("event_kind") in {"merge", "share"}:
+            quote = excerpt(latest.get("content") or "", 700)
+            body = "下面只转发被选中的公开答复。请根据这段补充或质疑，不要重复上一问。 " + quote
+        else:
+            body = req.user_latest or ""
+    return flat_forward(body)
 
 
 def _chunks(text: str, size: int = 18) -> list[str]:

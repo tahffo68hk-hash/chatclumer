@@ -7,10 +7,12 @@ from app.providers import (
     GenRequest,
     ProviderError,
     RoutedProvider,
+    flat_forward,
     parse_anthropic_data,
     parse_gemini_data,
     parse_ollama_data,
     parse_openai_data,
+    web_forward_text,
 )
 from app.secrets import SecretStore
 
@@ -154,3 +156,20 @@ async def test_paid_and_free_router_guards(tmp_path):
     assert bodies[0]["provider"] == {"allow_fallbacks": False}
     assert "models" not in bodies[0]
     assert len(bodies) == 1
+
+
+def test_web_forward_is_one_paragraph_and_capped():
+    noisy = "第一行\n\n第二行  【演示】  😀  " + ("字" * 900)
+    flat = flat_forward(noisy)
+    assert "\n" not in flat
+    assert len(flat) == 800
+    assert flat.endswith("…（已截断）")
+    assert "【演示】" in flat
+    req = request_for("web", "yuanbao")
+    req.phase = "cross"
+    req.reply_to = {"nickname": "林知秋", "content": "【演示回复】\n建议下一位 😀\n补充"}
+    text = web_forward_text(req)
+    assert "\n" not in text
+    assert text.startswith("林知秋 的公开答复:")
+    assert "【演示回复】 建议下一位 😀 补充" in text
+    assert text.endswith("请只根据这句公开答复补充或质疑。")
