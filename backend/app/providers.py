@@ -340,6 +340,8 @@ class RoutedProvider:
                 return "未打开受控自动发送。绑定标签页时需要明确允许。"
             if req.token_cap_set:
                 return "网页不回报精确 token。设了 token 上限时不会把字符数当成精确预算，这次不发送。"
+            if (req.web_conversation or "") != "tab":
+                return "扩展还没有确认这个标签页仍打开，不会发送。"
             from .webbridge import SITE_STATUS
 
             site_state = (SITE_STATUS.get(req.web_site) or {}).get("state")
@@ -466,7 +468,10 @@ class RoutedProvider:
             if cancel.is_set() or stale.is_set():
                 return
             if not job or job["status"] != "complete":
-                raise ProviderError((job or {}).get("error") or "网页没有返回新的助手回复")
+                reason = (job or {}).get("error") or "网页没有返回新的助手回复"
+                if reason == "extension_timeout":
+                    reason = "超时"
+                raise ProviderError(reason)
             text = job.get("result_text") or ""
             label = (job.get("model_label") or "").strip()
             req.web_model_label = label or "未能核验精确 model ID"

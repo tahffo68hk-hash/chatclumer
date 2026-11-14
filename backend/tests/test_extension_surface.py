@@ -22,6 +22,13 @@ def test_optional_hosts_do_not_get_a_static_content_script():
     assert ".hyc-common-markdown__ref-list" in yuanbao_js
     assert "onlyNew: true" in content
     assert "document.body" not in yuanbao_js
+    assert "yuanbaoDispatchSend" in yuanbao_js
+    assert "已填入，未发送" in yuanbao_js
+    assert "yuanbaoDispatchSend" in content
+    assert "clearIfUnsent" in content
+    remembered = popup.split("function rememberFields", 1)[1].split("}", 1)[0]
+    assert "memberId" in remembered and "tabKey" in remembered
+    assert "code" not in remembered
     zhipu = content.split("zhipu:", 1)[1].split("};", 1)[0]
     assert "正文位置未验证" in zhipu
     assert "querySelector" not in zhipu or "composer: () => null" in zhipu

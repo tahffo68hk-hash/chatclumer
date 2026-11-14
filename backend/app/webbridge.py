@@ -44,7 +44,7 @@ SITE_STATUS = {
     },
     "yuanbao": {
         "state": "coordinator_dom_not_e2e",
-        "detail": "结构取自协调方实页 2026-11-15。只读发送后新增的 .agent-chat__list__item--ai 里的 .hyc-common-markdown，排除参考资料、过程列表和全屏图片。本机没有完成游客发送，自动发送还没有经过协调方验收，不是扩展端到端。",
+        "detail": "结构取自协调方实页 2026-11-15。受控自动发送只在已绑定且无登录层时点击 Send 或回车，并要看到新增的用户气泡。等待协调方实页验收，不是扩展端到端。",
     },
     "zhipu": {
         "state": "login_wall",
@@ -77,6 +77,7 @@ class WebBridge:
         self.waiters: dict[str, asyncio.Event] = {}
         self.locks: dict[str, asyncio.Lock] = {}
         self.loop: asyncio.AbstractEventLoop | None = None
+        self.on_progress = None
 
     def tab_lock(self, key: str) -> asyncio.Lock:
         lock = self.locks.get(key)
@@ -124,6 +125,14 @@ class WebBridge:
                 (_hash(token),),
             ).fetchone()
         return row is not None
+
+    def note_progress(self, request_id: str, phase: str) -> dict:
+        job = self.get_job(request_id)
+        if not job or job["status"] not in {"queued", "sending"}:
+            return {"ok": False}
+        if self.on_progress:
+            self.on_progress(job, phase)
+        return {"ok": True}
 
     def note_tabs(self, tabs: list[dict]) -> dict:
         updated = 0
@@ -375,7 +384,7 @@ class WebBridge:
             event = asyncio.Event()
             self.waiters[request_id] = event
         self.loop = asyncio.get_running_loop()
-        deadline = asyncio.get_running_loop().time() + 75
+        deadline = asyncio.get_running_loop().time() + 90
         while True:
             if cancel.is_set() or stale.is_set():
                 self.cancel_request(request_id, "stopped" if cancel.is_set() else "stale_context")

@@ -272,11 +272,12 @@ export function ChatApp() {
   useEffect(() => {
     if (!currentId) return;
     const timer = window.setInterval(() => {
+      api.session(currentId).then((detail) => setMembers(detail.members)).catch(() => undefined);
       if (!session || session.status === "running" || session.status === "paused") {
         loadRoom(currentId).catch(() => undefined);
         loadList().catch(() => undefined);
       }
-    }, 1000);
+    }, 2000);
     return () => window.clearInterval(timer);
   }, [currentId, loadList, loadRoom, session]);
 
@@ -1305,7 +1306,11 @@ function MessageRow({ message, reply, onReply, onFavorite }: { message: ChatMess
                 {message.provider === "local" ? "本地回顾" : message.is_demo ? "演示总结" : "模型综合"}
               </Badge>
             )}
-            {message.status === "streaming" && <Badge variant="secondary">正在说</Badge>}
+            {message.status === "streaming" && (
+              <Badge variant="secondary">
+                {["等待回复", "已填入，尚未发送", "已填入，未发送", "超时"].includes(message.content) ? message.content : "正在说"}
+              </Badge>
+            )}
             {message.status === "error" && <Badge variant="destructive">失败</Badge>}
             {discarded && <Badge variant="secondary">{message.status === "cancelled" ? "已取消" : "已丢弃"}</Badge>}
           </div>

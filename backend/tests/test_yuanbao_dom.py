@@ -105,3 +105,56 @@ def test_yuanbao_reader_takes_only_the_new_ai_bubble():
     assert read["send"] == "Send"
     assert stopped == "yes"
     assert login is True
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(channel="chrome", headless=True)
+        page = browser.new_page()
+        page.set_content(
+            """
+            <div class="agent-chat__list__item--human">旧问题</div>
+            <div class="ql-editor" contenteditable="true" data-placeholder="Send Message">请用一句话给一个读书建议。</div>
+            <div aria-label="Send"></div>
+            """
+        )
+        page.add_script_tag(path=str(ROOT / "extension" / "yuanbao.js"))
+        page.evaluate(
+            """() => {
+              document.querySelector("[aria-label=Send]").addEventListener("click", () => {
+                const row = document.createElement("div");
+                row.className = "agent-chat__list__item agent-chat__list__item--human";
+                document.body.appendChild(row);
+              });
+            }"""
+        )
+        sent = page.evaluate(
+            """() => yuanbaoDispatchSend(document, "请用一句话给一个读书建议。", 500)"""
+        )
+        quiet = page.evaluate(
+            """() => {
+              const send = document.querySelector("[aria-label=Send]");
+              send.replaceWith(send.cloneNode(true));
+              return yuanbaoDispatchSend(document, "请用一句话给一个读书建议。", 200);
+            }"""
+        )
+        mismatch = page.evaluate(
+            """() => yuanbaoDispatchSend(document, "另一句", 200)"""
+        )
+        entered = page.evaluate(
+            """() => {
+              const send = document.querySelector("[aria-label=Send]");
+              send.setAttribute("aria-disabled", "true");
+              const editor = document.querySelector(".ql-editor");
+              editor.addEventListener("keydown", (event) => {
+                if (event.key !== "Enter") return;
+                const row = document.createElement("div");
+                row.className = "agent-chat__list__item--human";
+                document.body.appendChild(row);
+              });
+              return yuanbaoDispatchSend(document, "请用一句话给一个读书建议。", 500);
+            }"""
+        )
+        browser.close()
+    assert sent["ok"] is True
+    assert quiet["ok"] is False
+    assert quiet["detail"] == "已填入，未发送"
+    assert mismatch["detail"] == "输入框内容和待发文本不一致，没有点击发送"
+    assert entered["ok"] is True

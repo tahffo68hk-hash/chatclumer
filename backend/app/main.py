@@ -209,6 +209,11 @@ class WebMemberIn(MemberIn):
     web_auto: bool = False
 
 
+class ProgressIn(BaseModel):
+    request_id: str
+    phase: str
+
+
 class JobResultIn(BaseModel):
     request_id: str
     run_id: str | None = None
@@ -337,6 +342,7 @@ def create_app(db_path: str | None = None, secrets_path: str | None = None, prov
     room = RoomEngine(database, routed)
     bridge = WebBridge(database)
     room.web = bridge
+    room.attach_web_progress(bridge)
     if hasattr(routed, "web"):
         routed.web = bridge
 
@@ -407,6 +413,14 @@ def create_app(db_path: str | None = None, secrets_path: str | None = None, prov
         _ext_same_machine(request)
         _require_ext(authorization)
         return bridge.finish_job(body.model_dump())
+
+    @app.post("/api/ext/jobs/progress")
+    def ext_progress(body: ProgressIn, request: Request, authorization: str | None = Header(None)):
+        _ext_same_machine(request)
+        _require_ext(authorization)
+        if body.phase not in {"filled", "waiting", "unsent", "timeout"}:
+            raise HTTPException(400, "不认识的进度")
+        return bridge.note_progress(body.request_id, body.phase)
 
     @app.post("/api/ext/tabs")
     def ext_tabs(body: TabsIn, request: Request, authorization: str | None = Header(None)):

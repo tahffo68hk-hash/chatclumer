@@ -67,6 +67,26 @@ class RoomEngine:
     def unsubscribe(self, session_id: str, queue: asyncio.Queue) -> None:
         self.subscribers.get(session_id, set()).discard(queue)
 
+    def attach_web_progress(self, bridge) -> None:
+        labels = {
+            "filled": "已填入，尚未发送",
+            "waiting": "等待回复",
+            "unsent": "已填入，未发送",
+            "timeout": "超时",
+        }
+
+        def publish(job: dict, phase: str) -> None:
+            text = labels.get(phase)
+            if not text:
+                return
+            for message in reversed(self.db.list_messages(job["session_id"])):
+                if message.get("member_id") == job.get("member_id") and message.get("status") == "streaming":
+                    updated = self.db.update_message(message["id"], content=text)
+                    self.publish(job["session_id"], "message", updated)
+                    return
+
+        bridge.on_progress = publish
+
     def publish(self, session_id: str, event: str, data) -> None:
         payload = {"event": event, "data": data}
         for queue in list(self.subscribers.get(session_id, set())):
@@ -978,7 +998,7 @@ class RoomEngine:
                 "provider": member["provider"],
                 "model_id": member["model_id"],
                 "avatar_color": member.get("avatar_color"),
-                "content": "",
+                "content": "等待回复" if member.get("provider") == "web" else "",
                 "status": "streaming",
                 "reply_to_id": reply_to["id"] if reply_to else None,
                 "round_number": round_no,
@@ -1017,6 +1037,8 @@ class RoomEngine:
                     chunk = nxt.result()
                 except StopAsyncIteration:
                     break
+                if request.provider == "web" and not parts:
+                    self.db.update_message(message["id"], content="")
                 parts.append(chunk)
                 updated = self.db.append_message(message["id"], chunk)
                 self.publish(session_id, "message", updated)

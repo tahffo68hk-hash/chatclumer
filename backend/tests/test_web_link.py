@@ -64,3 +64,55 @@ def test_extension_tab_heartbeat_rejects_another_site(tmp_path):
         json={"tabs": []},
     )
     assert denied.status_code == 403
+
+
+def test_unbound_tab_does_not_send_and_progress_replaces_the_waiting_line(tmp_path):
+    app = create_app(str(tmp_path / "room.db"), str(tmp_path / "secrets.json"))
+    client = TestClient(app)
+    created = client.post("/api/sessions", json={"title": "进度", "max_rounds": 1, "max_seconds": 30}).json()
+    saved = client.post(f"/api/sessions/{created['id']}/members/web", json=_web_body()).json()
+    sent = client.post(f"/api/sessions/{created['id']}/messages", json={"content": "读书", "audience": "all"})
+    assert sent.status_code == 200
+    import time
+    time.sleep(0.4)
+    body = str(client.get(f"/api/sessions/{created['id']}/messages").json())
+    assert "扩展还没有确认这个标签页仍打开" in body
+    count = app.state.engine.web.db.conn.execute("SELECT COUNT(*) AS n FROM ext_jobs").fetchone()[0]
+    assert count == 0
+    client.post(f"/api/sessions/{created['id']}/stop")
+    message = app.state.db.add_message(
+        {
+            "session_id": created["id"],
+            "member_id": saved["id"],
+            "nickname": "网页甲",
+            "role_name": "读者",
+            "provider": "web",
+            "model_id": "web:fixture",
+            "author_type": "ai",
+            "content": "等待回复",
+            "status": "streaming",
+        }
+    )
+    app.state.engine.web.create_job(
+        {
+            "request_id": "job-progress",
+            "session_id": created["id"],
+            "member_id": saved["id"],
+            "context_version": 1,
+            "origin": "http://127.0.0.1:43124",
+            "site": "fixture",
+            "tab_key": "fixture-key",
+            "prompt": "读书",
+        }
+    )
+    code = client.post("/api/ext/code").json()["code"]
+    token = client.post("/api/ext/pair", json={"code": code}).json()["token"]
+    progress = client.post(
+        "/api/ext/jobs/progress",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"request_id": "job-progress", "phase": "unsent"},
+    )
+    assert progress.status_code == 200
+    updated = app.state.db.get_message(message["id"])
+    assert updated["content"] == "已填入，未发送"
+    assert updated["status"] == "streaming"

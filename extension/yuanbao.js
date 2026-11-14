@@ -25,6 +25,44 @@ function yuanbaoAssistants(root) {
   return [...root.querySelectorAll(".agent-chat__list__item--ai")];
 }
 
+function yuanbaoHumans(root) {
+  return [...root.querySelectorAll(".agent-chat__list__item--human")];
+}
+
+function yuanbaoComposerText(node) {
+  if (!node) return "";
+  return (node.innerText || node.value || node.textContent || "").trim();
+}
+
+function yuanbaoSendUsable(root) {
+  const send = yuanbaoSend(root);
+  if (!send || send.disabled || send.getAttribute("aria-disabled") === "true") return null;
+  return send;
+}
+
+async function yuanbaoDispatchSend(root, prompt, timeoutMs, shouldAbort) {
+  if (shouldAbort && shouldAbort()) return { ok: false, detail: "cancelled", clicked: false };
+  if (yuanbaoLogin(root)) return { ok: false, detail: "页面停在登录或验证，没有点击发送", clicked: false };
+  const composer = yuanbaoComposer(root);
+  if (!composer) return { ok: false, detail: "找不到输入框", clicked: false };
+  if (yuanbaoComposerText(composer) !== String(prompt || "").trim()) {
+    return { ok: false, detail: "输入框内容和待发文本不一致，没有点击发送", clicked: false };
+  }
+  const before = yuanbaoHumans(root).length;
+  const send = yuanbaoSendUsable(root);
+  if (send) send.click();
+  else {
+    composer.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", bubbles: true, cancelable: true }));
+  }
+  const deadline = Date.now() + (timeoutMs == null ? 10000 : timeoutMs);
+  while (Date.now() < deadline) {
+    if (shouldAbort && shouldAbort()) return { ok: false, detail: "cancelled", clicked: true };
+    if (yuanbaoHumans(root).length > before) return { ok: true, clicked: true };
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return { ok: false, detail: "已填入，未发送", clicked: true };
+}
+
 function yuanbaoText(node) {
   const md = node.querySelector(".hyc-common-markdown");
   if (!md) return "";

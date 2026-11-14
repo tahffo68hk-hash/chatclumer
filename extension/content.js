@@ -88,7 +88,8 @@ function snapshot(adapter) {
 async function waitNew(adapter, before, signal) {
   let last = "";
   let stable = 0;
-  for (let i = 0; i < 80; i += 1) {
+  const deadline = Date.now() + (adapter.onlyNew ? 80000 : 32000);
+  while (Date.now() < deadline) {
     if (signal.cancelled) return cancelResult();
     if (adapter.login && adapter.login()) {
       clickSiteStop();
@@ -115,7 +116,7 @@ async function waitNew(adapter, before, signal) {
   return {
     status: "error",
     detail: adapter.onlyNew
-      ? "没有等到新增的助手回复。没有读取发送前就存在的消息。"
+      ? "超时"
       : "没有等到新的助手回复",
   };
 }
@@ -139,6 +140,30 @@ function cancelResult() {
       : "源站没有可确认的停止按钮，页面可能继续生成，本应用不会再发送",
     page_url: location.origin + location.pathname,
   };
+}
+
+function clearIfUnsent(box, prompt) {
+  if (!box) return;
+  const current = ("value" in box && !box.isContentEditable ? box.value : box.innerText || box.textContent || "").trim();
+  if (current !== String(prompt || "").trim()) return;
+  box.focus();
+  if (box.isContentEditable) {
+    document.execCommand("selectAll", false, null);
+    document.execCommand("delete", false, null);
+    box.textContent = "";
+    box.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContentBackward" }));
+    return;
+  }
+  box.value = "";
+  box.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+function reportPhase(job, phase) {
+  try {
+    chrome.runtime.sendMessage({ type: "job-progress", request_id: job.request_id, phase });
+  } catch {
+    /* 进度失败不改变发送结果 */
+  }
 }
 
 function fillComposer(box, prompt) {
@@ -191,18 +216,38 @@ async function runJob(job) {
     if (!box) return { status: "error", detail: "找不到输入框", page_url: pageUrl };
     if (signal.cancelled || job.action === "cancel") return { ...cancelResult(), page_url: pageUrl };
     fillComposer(box, job.prompt);
-    let send = null;
-    for (let i = 0; i < 10; i += 1) {
-      send = adapter.send();
-      if (send && !dangerous(send)) break;
-      send = null;
-      await new Promise((resolve) => setTimeout(resolve, 200));
-    }
-    if (!send) return { status: "error", detail: "找不到安全的发送按钮", page_url: pageUrl };
-    if (signal.cancelled) return { ...cancelResult(), page_url: pageUrl };
     remember(job.request_id);
-    send.click();
+    let posted = false;
+    if (typeof yuanbaoDispatchSend === "function" && site === "yuanbao") {
+      reportPhase(job, "filled");
+      const outcome = await yuanbaoDispatchSend(document, job.prompt, 10000, () => signal.cancelled);
+      if (signal.cancelled || outcome.detail === "cancelled") {
+        if (!outcome.ok) clearIfUnsent(box, job.prompt);
+        return { ...cancelResult(), page_url: pageUrl };
+      }
+      if (!outcome.ok) {
+        clearIfUnsent(box, job.prompt);
+        reportPhase(job, "unsent");
+        return { status: "error", detail: outcome.detail, page_url: pageUrl };
+      }
+      posted = true;
+      reportPhase(job, "waiting");
+    } else {
+      let send = null;
+      for (let i = 0; i < 10; i += 1) {
+        send = adapter.send();
+        if (send && !dangerous(send)) break;
+        send = null;
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+      if (!send) return { status: "error", detail: "找不到安全的发送按钮", page_url: pageUrl };
+      if (signal.cancelled) return { ...cancelResult(), page_url: pageUrl };
+      send.click();
+      posted = true;
+    }
     const result = await waitNew(adapter, before, signal);
+    if (result.status === "cancelled" && !posted) clearIfUnsent(box, job.prompt);
+    if (result.detail === "超时") reportPhase(job, "timeout");
     if (result.status === "cancelled" && !String(result.detail || "").includes("停止")) {
       const stopped = clickSiteStop();
       result.detail = stopped

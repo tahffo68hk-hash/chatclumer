@@ -1,5 +1,20 @@
 const BACKEND = "http://127.0.0.1:43124";
 
+chrome.storage.local.get(["memberId", "tabKey"]).then(({ memberId, tabKey }) => {
+  if (memberId) document.getElementById("member").value = memberId;
+  if (tabKey) document.getElementById("tabkey").value = tabKey;
+});
+
+function rememberFields() {
+  chrome.storage.local.set({
+    memberId: document.getElementById("member").value.trim(),
+    tabKey: document.getElementById("tabkey").value.trim(),
+  });
+}
+
+document.getElementById("member").addEventListener("change", rememberFields);
+document.getElementById("tabkey").addEventListener("change", rememberFields);
+
 document.getElementById("pair").addEventListener("click", async () => {
   const code = document.getElementById("code").value.trim();
   const response = await fetch(`${BACKEND}/api/ext/pair`, {
@@ -27,6 +42,7 @@ document.getElementById("bind").addEventListener("click", async () => {
     document.getElementById("status").textContent = "这个站点不在允许列表";
     return;
   }
+  rememberFields();
   const tabKey = document.getElementById("tabkey").value.trim();
   if (!tabKey) {
     document.getElementById("status").textContent = "先在房间里复制这个成员的绑定键";

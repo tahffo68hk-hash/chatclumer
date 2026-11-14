@@ -114,6 +114,17 @@ async function ensureScript(origin, tabId) {
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === "job-progress") {
+    load().then(async ({ pairToken }) => {
+      if (!pairToken) return;
+      await fetch(`${BACKEND}/api/ext/jobs/progress`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${pairToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ request_id: message.request_id, phase: message.phase }),
+      }).catch(() => {});
+    });
+    return;
+  }
   if (message?.type === "ensure-script") {
     ensureScript(message.origin, message.tabId).then(sendResponse).catch((err) => {
       sendResponse({ ok: false, detail: err?.message || "内容脚本没有装上" });
