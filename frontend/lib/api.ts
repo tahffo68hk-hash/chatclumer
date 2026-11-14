@@ -36,6 +36,8 @@ export const api = {
   deleteSession: (id: string) => request(`/api/sessions/${id}`, { method: "DELETE" }),
   addMember: (id: string, body: Record<string, unknown>) =>
     request<Member>(`/api/sessions/${id}/members`, { method: "POST", body: JSON.stringify(body) }),
+  addWebMember: (id: string, body: Record<string, unknown>) =>
+    request<Member>(`/api/sessions/${id}/members/web`, { method: "POST", body: JSON.stringify(body) }),
   patchMember: (id: string, body: Record<string, unknown>) => request<Member>(`/api/members/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   webBind: (id: string, body: { web_site: string; web_origin: string; web_tab_key: string; web_auto: boolean }) =>
     request<Member>(`/api/members/${id}/web-bind`, { method: "POST", body: JSON.stringify(body) }),

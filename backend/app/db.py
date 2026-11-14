@@ -5,12 +5,37 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from .util import new_id, now_iso
 
 MEMBER_COLORS = ["#9a3412", "#0f766e", "#1d4ed8", "#7c2d12", "#6d28d9", "#3f6212"]
+TAB_HEARTBEAT_SECONDS = 20
+
+
+def _web_link(row: dict) -> str:
+    if row.get("provider") != "web":
+        return ""
+    conversation = row.get("web_conversation") or ""
+    seen = row.get("web_seen_at") or ""
+    fresh = False
+    if seen:
+        try:
+            moment = datetime.fromisoformat(seen)
+            if moment.tzinfo is None:
+                moment = moment.replace(tzinfo=timezone.utc)
+            fresh = (datetime.now(timezone.utc) - moment).total_seconds() <= TAB_HEARTBEAT_SECONDS
+        except ValueError:
+            fresh = False
+    if conversation in {"down", "needs_rebind"} or (conversation == "tab" and not fresh):
+        return "掉线"
+    if conversation == "tab" and fresh and row.get("web_origin") and row.get("web_tab_key"):
+        return "已绑定标签页"
+    if row.get("web_origin") and row.get("web_tab_key"):
+        return "已配置，等待扩展绑定"
+    return "未绑定"
 
 
 def _bool_message(row: dict) -> dict:
@@ -147,6 +172,7 @@ class Database:
         self._ensure_column("members", "web_model_label", "TEXT")
         self._ensure_column("members", "web_conversation", "TEXT")
         self._ensure_column("members", "web_auto", "INTEGER NOT NULL DEFAULT 0")
+        self._ensure_column("members", "web_seen_at", "TEXT")
         self._ensure_column("sessions", "parent_started_at", "TEXT")
         self._ensure_column("sessions", "parent_deadline_at", "TEXT")
         self._ensure_column("sessions", "run_tokens_known", "INTEGER NOT NULL DEFAULT 1")
@@ -255,6 +281,7 @@ class Database:
             return None
         row["enabled"] = bool(row["enabled"])
         row["web_auto"] = bool(row.get("web_auto"))
+        row["web_link"] = _web_link(row)
         return row
 
     def create_session(self, **fields: Any) -> dict:
@@ -656,6 +683,7 @@ class Database:
             "web_model_label",
             "web_conversation",
             "web_auto",
+            "web_seen_at",
         }
         with self._lock:
             sets = []

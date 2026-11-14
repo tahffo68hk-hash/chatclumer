@@ -110,9 +110,7 @@ function freshTabKey(site: string) {
 
 function bindStatus(member: Member) {
   if (member.provider !== "web") return "";
-  if (member.web_conversation === "needs_rebind" || member.web_conversation === "down") return "掉线";
-  if (member.web_origin && member.web_tab_key) return "已绑定标签页";
-  return "未绑定";
+  return member.web_link || "未绑定";
 }
 
 const emptyMember = {
@@ -160,6 +158,7 @@ export function ChatApp() {
   const [sideTab, setSideTab] = useState<"rooms" | "members" | "records">("rooms");
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
   const [memberOpen, setMemberOpen] = useState(false);
+  const [memberError, setMemberError] = useState("");
   const [connectOpen, setConnectOpen] = useState(false);
   const [memberForm, setMemberForm] = useState(emptyMember);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -385,12 +384,14 @@ export function ChatApp() {
   function openCreateMember() {
     const preset = catalog.find((item) => item.provider === "demo");
     setEditingId(null);
+    setMemberError("");
     setMemberForm({ ...emptyMember, model_id: preset?.model_id || "demo-synthesizer-v1" });
     setMemberOpen(true);
   }
 
   function openEditMember(member: Member) {
     setEditingId(member.id);
+    setMemberError("");
     setMemberForm({
       nickname: member.nickname,
       role_name: member.role_name,
@@ -410,8 +411,9 @@ export function ChatApp() {
 
   async function saveMember() {
     if (!currentId) return;
+    setMemberError("");
     if (memberForm.provider === "web" && (!memberForm.web_origin.trim() || !memberForm.web_tab_key.trim())) {
-      setError("网页会话要填写页面地址和绑定键");
+      setMemberError("网页会话要填写页面地址和绑定键");
       return;
     }
     const body = {
@@ -425,19 +427,34 @@ export function ChatApp() {
       enabled: memberForm.enabled,
     };
     try {
-      const saved = editingId ? await api.patchMember(editingId, body) : await api.addMember(currentId, body);
-      if (memberForm.provider === "web") {
-        await api.webBind(saved.id, {
+      if (memberForm.provider === "web" && !editingId) {
+        await api.addWebMember(currentId, {
+          ...body,
           web_site: memberForm.web_site,
           web_origin: memberForm.web_origin.trim(),
           web_tab_key: memberForm.web_tab_key.trim(),
           web_auto: memberForm.web_auto,
         });
+      } else {
+        const saved = editingId ? await api.patchMember(editingId, body) : await api.addMember(currentId, body);
+        if (memberForm.provider === "web") {
+          try {
+            await api.webBind(saved.id, {
+              web_site: memberForm.web_site,
+              web_origin: memberForm.web_origin.trim(),
+              web_tab_key: memberForm.web_tab_key.trim(),
+              web_auto: memberForm.web_auto,
+            });
+          } catch (err) {
+            if (!editingId) await api.deleteMember(saved.id).catch(() => undefined);
+            throw err;
+          }
+        }
       }
       setMemberOpen(false);
       await loadRoom(currentId);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "成员保存失败");
+      setMemberError(err instanceof Error ? err.message : "成员保存失败");
     }
   }
 
@@ -995,7 +1012,7 @@ export function ChatApp() {
           <ol className="list-decimal space-y-2 pl-4 text-sm leading-6" data-testid="connect-steps">
             <li>在设置里生成本机配对码，粘贴到扩展弹窗并点配对。令牌只留在扩展里，不会进聊天。</li>
             <li>在成员里添加「网页会话」。选来源，填写页面地址和绑定键。需要房间代发时打开受控自动发送，然后保存。</li>
-            <li>成员卡片上有可选择复制的成员 ID 和绑定键。状态是未绑定、已绑定标签页，或掉线。</li>
+            <li>保存后卡片是「已配置，等待扩展绑定」。扩展绑定当前标签页并保持打开，心跳到达后才变成「已绑定标签页」。大约 20 秒没有心跳则是「掉线」。</li>
             <li>用普通 Chrome 打开那个页面。扩展弹窗填同一组 ID 和绑定键，点绑定当前标签页。元宝、智谱等要在这时允许该站点，扩展才会装上内容脚本。</li>
             <li>夹具地址是 http://127.0.0.1:43124/fixture/chat 。Gemini 游客页可以绑定。元宝和智谱可以保存绑定，但公开回复的正文位置还没核实，房间不会自动点击发送。</li>
           </ol>
@@ -1042,6 +1059,7 @@ export function ChatApp() {
             <Input data-testid="member-model" value={memberForm.model_id} onChange={(event) => setMemberForm({ ...memberForm, model_id: event.target.value })} />
             <Label>API Base（可选）</Label>
             <Input value={memberForm.api_base} onChange={(event) => setMemberForm({ ...memberForm, api_base: event.target.value })} />
+            {memberError && <p data-testid="member-error" className="rounded-lg bg-[#fee4e2] px-3 py-2 text-sm text-[#b42318]">{memberError}</p>}
             <Label>密钥变量名（不在这里填密钥）</Label>
             <Input value={memberForm.api_key_env} onChange={(event) => setMemberForm({ ...memberForm, api_key_env: event.target.value })} />
             {memberForm.provider === "web" && (

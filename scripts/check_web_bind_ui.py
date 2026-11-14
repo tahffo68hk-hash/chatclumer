@@ -30,7 +30,14 @@ def main() -> None:
         page.get_by_test_id("web-auto").click()
         page.get_by_test_id("member-save").click()
         page.get_by_test_id("web-card").wait_for()
-        assert page.get_by_test_id("bind-status").inner_text() == "已绑定标签页"
+        page.get_by_test_id("add-member").click()
+        page.get_by_test_id("member-nickname").fill("网页甲")
+        page.get_by_test_id("member-provider").select_option("web")
+        page.get_by_test_id("web-tab-key").fill("fixture-from-ui")
+        page.get_by_test_id("member-save").click()
+        assert "同名" in page.get_by_test_id("member-error").inner_text()
+        page.keyboard.press("Escape")
+        assert page.get_by_test_id("bind-status").inner_text() == "已配置，等待扩展绑定"
         member_id = page.get_by_test_id("member-id").input_value()
         assert page.get_by_test_id("tab-key").input_value() == "fixture-from-ui"
         assert member_id

@@ -43,8 +43,8 @@ SITE_STATUS = {
         "detail": "允许逐站授权 https://www.doubao.com/chat/ 。协调方看到登录后才有回复。本机还没有核验输入框，不会发送，也不写成永远没有游客。",
     },
     "yuanbao": {
-        "state": "vm_login_on_send",
-        "detail": "2026-11-15 01:40 CST（2026-11-14T17:40:41Z）本机看见输入框 data-placeholder=Send Message，以及 aria-label=Send。点 Send 后回到微信登录，没有读到助手正文节点。协调方机器上的游客可聊和 Stop Answering 不是这里的扩展回路。房间仍拒绝自动发送：公开回复的选择器未核实，不会用整页文字代替。",
+        "state": "coordinator_dom_not_e2e",
+        "detail": "结构取自协调方实页 2026-11-15。只读发送后新增的 .agent-chat__list__item--ai 里的 .hyc-common-markdown，排除参考资料、过程列表和全屏图片。本机没有完成游客发送，自动发送还没有经过协调方验收，不是扩展端到端。",
     },
     "zhipu": {
         "state": "login_wall",
@@ -124,6 +124,36 @@ class WebBridge:
                 (_hash(token),),
             ).fetchone()
         return row is not None
+
+    def note_tabs(self, tabs: list[dict]) -> dict:
+        updated = 0
+        with self.db._lock:
+            rows = self.db.conn.execute(
+                "SELECT id, web_tab_key, web_origin FROM members WHERE provider='web'"
+            ).fetchall()
+            now = now_iso()
+            for beat in tabs:
+                key = (beat.get("tab_key") or "").strip()
+                origin = origin_of(beat.get("origin") or "")
+                if not key or not origin:
+                    continue
+                alive = bool(beat.get("alive"))
+                for row in rows:
+                    if (row["web_tab_key"] or "") != key or (row["web_origin"] or "") != origin:
+                        continue
+                    if alive:
+                        self.db.conn.execute(
+                            "UPDATE members SET web_conversation='tab', web_seen_at=? WHERE id=?",
+                            (now, row["id"]),
+                        )
+                    else:
+                        self.db.conn.execute(
+                            "UPDATE members SET web_conversation='down' WHERE id=?",
+                            (row["id"],),
+                        )
+                    updated += 1
+            self.db.conn.commit()
+        return {"ok": True, "updated": updated}
 
     def site_blocked(self, site: str) -> str | None:
         with self.db._lock:

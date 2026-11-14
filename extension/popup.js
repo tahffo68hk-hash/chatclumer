@@ -46,6 +46,6 @@ document.getElementById("bind").addEventListener("click", async () => {
   }
   chrome.runtime.sendMessage({ type: "save-binding", tab_key: tabKey, tabId: tab.id, origin }, () => {
     const how = ready.how === "dynamic" ? "已为这个站点注册内容脚本。" : "这个站点使用清单里的内容脚本。";
-    document.getElementById("status").textContent = `已绑定 ${origin}。${how}不会扫描其他标签页。`;
+    document.getElementById("status").textContent = `已绑定 ${origin}。${how}房间要等扩展心跳后才显示已绑定标签页。`;
   });
 });

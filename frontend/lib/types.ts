@@ -67,6 +67,7 @@ export type Member = {
   web_tab_key?: string | null;
   web_auto?: boolean;
   web_conversation?: string | null;
+  web_link?: string;
 };
 
 export type ChatMessage = {

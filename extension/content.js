@@ -51,17 +51,15 @@ const adapters = {
     },
   },
   yuanbao: {
-    composer: () => document.querySelector("[contenteditable='true'][data-placeholder='Send Message']"),
-    send: () => {
-      const el = document.querySelector("[aria-label='Send']");
-      return el && !dangerous(el) && !el.hidden ? el : null;
-    },
-    assistants: () => [],
-    text: () => "",
-    done: () => false,
+    composer: () => (typeof yuanbaoComposer === "function" ? yuanbaoComposer(document) : null),
+    send: () => (typeof yuanbaoSend === "function" ? yuanbaoSend(document) : null),
+    assistants: () => (typeof yuanbaoAssistants === "function" ? yuanbaoAssistants(document) : []),
+    text: (node) => (typeof yuanbaoText === "function" ? yuanbaoText(node) : ""),
+    done: (node) => (typeof yuanbaoDone === "function" ? yuanbaoDone(node) : false),
     model: () => "",
     openNew: () => null,
-    refuse: "元宝公开回复的正文位置还没有核实，不会点击发送，也不会用整页文字代替回复。",
+    onlyNew: true,
+    login: () => typeof yuanbaoLogin === "function" && yuanbaoLogin(document),
   },
   zhipu: {
     composer: () => null,
@@ -92,8 +90,14 @@ async function waitNew(adapter, before, signal) {
   let stable = 0;
   for (let i = 0; i < 80; i += 1) {
     if (signal.cancelled) return cancelResult();
+    if (adapter.login && adapter.login()) {
+      clickSiteStop();
+      return { status: "login", detail: "等待回复时页面停在登录，已停止，没有读取旧消息" };
+    }
     const nodes = adapter.assistants();
-    const fresh = nodes.filter((_, index) => snapshot(adapter)[index] !== before[index] || index >= before.length);
+    const fresh = adapter.onlyNew
+      ? nodes.slice(before.length)
+      : nodes.filter((_, index) => snapshot(adapter)[index] !== before[index] || index >= before.length);
     const node = fresh[fresh.length - 1];
     if (node && adapter.done(node)) {
       const text = adapter.text(node);
@@ -108,7 +112,12 @@ async function waitNew(adapter, before, signal) {
     }
     await new Promise((resolve) => setTimeout(resolve, 400));
   }
-  return { status: "error", detail: "没有等到新的助手回复" };
+  return {
+    status: "error",
+    detail: adapter.onlyNew
+      ? "没有等到新增的助手回复。没有读取发送前就存在的消息。"
+      : "没有等到新的助手回复",
+  };
 }
 
 function clickSiteStop() {
@@ -160,6 +169,7 @@ async function runJob(job) {
   const adapter = adapters[site];
   if (!adapter || site !== job.site) return { status: "error", detail: "当前页和任务站点不一致", page_url: pageUrl };
   if (adapter.refuse) return { status: "error", detail: adapter.refuse, page_url: pageUrl };
+  if (adapter.login && adapter.login()) return { status: "login", detail: "页面停在登录或验证，没有点击发送", page_url: pageUrl };
   if (sent.has(job.request_id)) return { status: "error", detail: "这个请求已经提交过，刷新后不会再点发送", page_url: pageUrl };
   if (job.action === "cancel") return { status: "cancelled", page_url: pageUrl };
   if (busy) return { status: "error", detail: "这个标签页正在处理上一条", page_url: pageUrl };

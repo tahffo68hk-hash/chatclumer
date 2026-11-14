@@ -192,6 +192,23 @@ class PairIn(BaseModel):
     code: str
 
 
+class TabBeat(BaseModel):
+    tab_key: str
+    origin: str
+    alive: bool = True
+
+
+class TabsIn(BaseModel):
+    tabs: list[TabBeat] = Field(default_factory=list)
+
+
+class WebMemberIn(MemberIn):
+    web_site: str = ""
+    web_origin: str = ""
+    web_tab_key: str = ""
+    web_auto: bool = False
+
+
 class JobResultIn(BaseModel):
     request_id: str
     run_id: str | None = None
@@ -391,6 +408,12 @@ def create_app(db_path: str | None = None, secrets_path: str | None = None, prov
         _require_ext(authorization)
         return bridge.finish_job(body.model_dump())
 
+    @app.post("/api/ext/tabs")
+    def ext_tabs(body: TabsIn, request: Request, authorization: str | None = Header(None)):
+        _ext_same_machine(request)
+        _require_ext(authorization)
+        return bridge.note_tabs([item.model_dump() for item in body.tabs])
+
     @app.post("/api/sessions/{session_id}/groups/preview")
     def preview_group(session_id: str, body: GroupIn):
         if not database.get_session(session_id):
@@ -459,7 +482,8 @@ def create_app(db_path: str | None = None, secrets_path: str | None = None, prov
                 "web_origin": origin,
                 "web_tab_key": body.web_tab_key.strip(),
                 "web_model_label": label,
-                "web_conversation": (body.web_conversation or "bound")[:80],
+                "web_conversation": "configured",
+                "web_seen_at": "",
                 "web_auto": body.web_auto,
             },
         )
@@ -591,6 +615,55 @@ def create_app(db_path: str | None = None, secrets_path: str | None = None, prov
                 await asyncio.wait_for(task, timeout=2)
         database.delete_session(session_id)
         return {"ok": True}
+
+    def _checked_bind(session_id: str, member_id: str | None, body: WebMemberIn) -> dict:
+        origin = origin_of(body.web_origin if "://" in body.web_origin else "")
+        if site_for_origin(origin) != body.web_site:
+            raise HTTPException(400, "来源和站点不一致，拒绝绑定")
+        tab_key = body.web_tab_key.strip()
+        if not tab_key or len(tab_key) > 80:
+            raise HTTPException(400, "需要这个标签页自己的绑定键")
+        for other in database.list_members(session_id):
+            if other["id"] != member_id and (other.get("web_tab_key") or "") == tab_key:
+                raise HTTPException(400, "两个成员不能共用同一个网页标签")
+        return {
+            "provider": "web",
+            "model_id": f"web:{body.web_site}",
+            "web_site": body.web_site,
+            "web_origin": origin,
+            "web_tab_key": tab_key,
+            "web_model_label": "未能核验精确 model ID",
+            "web_conversation": "configured",
+            "web_seen_at": "",
+            "web_auto": body.web_auto,
+        }
+
+    @app.post("/api/sessions/{session_id}/members/web")
+    def add_web_member(session_id: str, body: WebMemberIn):
+        if not database.get_session(session_id):
+            raise HTTPException(404, "找不到房间")
+        data = body.model_dump()
+        data["nickname"] = data["nickname"].strip()
+        if database.nickname_taken(session_id, data["nickname"]):
+            raise HTTPException(409, "这个房间里已有同名成员")
+        fields = _checked_bind(session_id, None, body)
+        _check_member({**data, "provider": "web", "model_id": fields["model_id"]})
+        created = database.create_member(
+            session_id=session_id,
+            nickname=data["nickname"],
+            role_name=data["role_name"],
+            persona=data.get("persona") or "",
+            provider="web",
+            model_id=fields["model_id"],
+            api_base=data.get("api_base"),
+            api_key_env=data.get("api_key_env"),
+            enabled=data.get("enabled", True),
+        )
+        try:
+            return database.update_member(created["id"], fields)
+        except Exception:
+            database.delete_member(created["id"])
+            raise
 
     @app.post("/api/sessions/{session_id}/members")
     def add_member(session_id: str, body: MemberIn):

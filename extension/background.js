@@ -10,6 +10,26 @@ async function remember(id) {
   await chrome.storage.session.set({ seenIds: [...seen].slice(-80) });
 }
 
+async function beat(token, bindings) {
+  const tabs = [];
+  for (const [tabKey, binding] of Object.entries(bindings || {})) {
+    let alive = false;
+    try {
+      const tab = await chrome.tabs.get(binding.tabId);
+      alive = !!tab;
+    } catch {
+      alive = false;
+    }
+    tabs.push({ tab_key: tabKey, origin: binding.origin, alive });
+  }
+  if (!tabs.length) return;
+  await fetch(`${BACKEND}/api/ext/tabs`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ tabs }),
+  }).catch(() => {});
+}
+
 async function poll() {
   const { pairToken, bindings } = await load();
   if (!pairToken) return;
@@ -43,6 +63,7 @@ async function poll() {
       report(pairToken, job, body);
     });
   }
+  await beat(pairToken, bindings);
 }
 
 async function report(token, job, result) {
@@ -82,13 +103,13 @@ async function ensureScript(origin, tabId) {
       {
         id,
         matches: [pattern],
-        js: ["content.js"],
+        js: ["yuanbao.js", "content.js"],
         runAt: "document_idle",
         persistAcrossSessions: true,
       },
     ]);
   }
-  if (tabId) await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] });
+  if (tabId) await chrome.scripting.executeScript({ target: { tabId }, files: ["yuanbao.js", "content.js"] });
   return { ok: true, how: "dynamic", id };
 }
 

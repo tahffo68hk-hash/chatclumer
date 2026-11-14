@@ -105,7 +105,8 @@ bash scripts/start.sh
 
 记录里的 UTC 已换成北京时间。2026-11-14T17:30:36Z 是 2026-11-15 01:30:36 CST。清单如下。
 
-- 旧的 21 个测试仍在。本机装了 Playwright 时，`cd backend && .venv/bin/pytest -q` 是 32 passed，其中 1 条是夹具停止按钮的浏览器测试，这台环境实际跑过。没有 Playwright 的新环境会显示 31 passed, 1 skipped。skipped 不是 passed，收集不会再因为缺 playwright 失败。安装见 `backend/requirements-dev.txt`。
+- 旧的 21 个测试仍在。本机装了 Playwright 时，`cd backend && .venv/bin/pytest -q` 是 35 passed。其中 2 条是浏览器测试：夹具停止按钮，以及用协调方 2026-11-15 页面结构做的元宝本地夹具。没有 Playwright 时是 33 passed, 2 skipped。skipped 不是 passed。安装见 `backend/requirements-dev.txt`。
+- 元宝自动发送还不是扩展端到端。读取规则来自协调方实页，本机没有重跑元宝游客发送。扩展请加载 0.2.1。
 - 浏览器：`backend/.venv/bin/python scripts/check_branch_ui.py` 通过。预览里有勾选的两人，没有未勾选的第三人；合并后能选择发给哪一组；拆分后刷新，状态不是进行中。
 - 扩展：品牌版 Chrome 157 不接受 `--load-extension`。Chrome for Testing 加载 `extension/` 后，`scripts/check_web_bridge.py` 的夹具和 Gemini 都是 passed。夹具第二次提交含「公开答复」，停止后仍是 2 条用户气泡，房间里有 2 条完成回复，模型名是「Fixture 本地」。
 - Gemini：https://gemini.google.com/app ，游客，页面显示 Flash-Lite。扩展先发送「请用中文给两条简短读书建议，每条一句话。」，房间记下两条建议；合并后再把选中的公开答复发进同一个页面，房间记下第二条回复；停止后 4 秒内没有新的助手消息。没有点登录、订阅或模式切换。
@@ -198,7 +199,7 @@ git status --short
 
 分组和网页桥提交后，用下面的命令核对。若其后只有记下哈希的修订，以 `git rev-parse HEAD` 为准，并确认功能提交仍是祖先。
 
-网页成员表单、收藏、分歧和按授权注册内容脚本在：
+元宝结构读取和绑定状态的提交由下一笔交接记下。上一包仍是祖先：
 
 `84f978e1ad08322480367071b246843b5a437ccb`
 
