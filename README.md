@@ -14,7 +14,7 @@ bash scripts/start.sh
 
 - 页面：http://127.0.0.1:43123
 - 后端：http://127.0.0.1:43124
-- 停止：`bash scripts/stop.sh`
+- 停止：`bash scripts/stop.sh`。它只结束本次启动记下的进程树。端口若仍被其他进程占用，会报出 PID 并失败，不会把别人的 HTTP 200 当成已启动。
 
 Windows 可参考 `scripts/start.ps1`，同样只绑定回环地址。
 

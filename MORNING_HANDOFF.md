@@ -27,7 +27,9 @@ git status --short
 bash scripts/start.sh
 ```
 
-停止：`bash scripts/stop.sh`。Windows 用 `scripts/start.ps1`。脚本会先检查 `node`、`npm` 和 `py`/`python`，缺了就停并说明要装 Python 3.11+ 与 Node.js 22。前后端都只绑定 `127.0.0.1`。`LAN=1 bash scripts/start.sh` 才会让前端听 `0.0.0.0`，并打印无登录警告。
+停止：`bash scripts/stop.sh`。Windows 用 `scripts/start.ps1` 和 `scripts/stop.ps1`。脚本会先检查 `node`、`npm` 和 `py`/`python`，缺了就停并说明要装 Python 3.11+ 与 Node.js 22。前后端都只绑定 `127.0.0.1`。`LAN=1 bash scripts/start.sh` 才会让前端听 `0.0.0.0`，并打印无登录警告。
+
+启动把后端和前端各自放进新会话，只在子进程上写下 `CHAT_ROOM_RUN` 标记。停止只向带这个标记的进程及其子进程发信号，不会按端口或进程名去结束别的服务。43123 或 43124 上如果已经有其他进程，启动立刻退出并写明 PID，不会干等健康检查，也不会把那个进程的 HTTP 200 当成就绪。就绪必须是本项目的 `/api/health` 和前端反代都返回 `"service":"multi-llm-chat-room"`。停止后若端口仍被占用，脚本退出码为 1，并说明自己没有结束那个 PID。旧版 `stop.sh` 只杀掉当时记下的父进程，`npx` 拉起的 `next dev` 和 `next-server` 会留下来；那种没有标记的旧进程，新脚本同样不会代为结束。
 
 ## 已完成（P0）
 
@@ -108,7 +110,9 @@ member persisted
 
 单测覆盖：mock 的 OpenAI 兼容总结模型恰好请求一次，六段标题都在，`is_demo` 为假，消息条数不越限；用户停止、token 预算为 1、以及没有密钥时都不发总结请求，并保留本地回顾标记。输入 token 超过上限时 0 次请求；token 上限下首轮不会并发打出第二个请求。OpenRouter 非 `:free` 在有费用上限时不联网；`:free` 请求体模型 ID 不变，且 `allow_fallbacks` 为 false。
 
-`scripts/start.ps1` 在这台 Linux 上没有 PowerShell，没有实际跑起来。静态核对：缺 Python/Node 会停并提示，端口写死 `127.0.0.1:43123` 和 `43124`。
+`bash scripts/test_lifecycle.sh` 在本机通过：孙子进程占着的端口会随标记一起释放，旁边另一个端口上的服务还在；其他服务占着 43123 并返回 HTTP 200 时，`start.sh` 立即失败且不杀掉它；接着真实执行 start → stop（43123 与 43124 都释放）→ start → stop，两次停止后都没有残留监听。
+
+`scripts/start.ps1` 和 `scripts/stop.ps1` 在这台 Linux 上没有 PowerShell，没有实际跑起来。静态核对：缺 Python/Node 会停并提示；启动前检查端口；就绪要看到 `multi-llm-chat-room`；停止只沿记下的进程树往下结束，不用 `taskkill` 按映像名清理，端口仍被占用时退出失败。
 
 截图在包内，相对本文件：
 
@@ -139,25 +143,22 @@ member persisted
 - 开发依赖里仍有 11 项 moderate/low，见「依赖安全」。
 - QQ / 微信未接通。
 
-## 源码包
+## 源码包与 Git 历史
 
-`artifacts/multi-llm-chat-room-src.zip`
-
-不含 `node_modules`、`.next`、`.venv`、数据库、密钥和 `.git`。保留 lockfile、脚本、文档和 `docs/screenshots`。
-
-## 当前提交
-
-功能、截图和交接正文在：
-
-`55a7bbd34eb6ca00fb8b4d8cc7c94fc7ce00b879`
-
-若其后只有一行「记下这个哈希」的修订，包对应的是 `git rev-parse HEAD`。核对：
+- `artifacts/multi-llm-chat-room-src.zip`：不含 `node_modules`、`.next`、`.venv`、数据库、密钥和 `.git`。保留 lockfile、脚本、文档和 `docs/screenshots`。
+- `artifacts/multi-llm-chat-room.bundle`：本地 commit 历史，不含密钥文件。在空目录还原：
 
 ```bash
+git clone multi-llm-chat-room.bundle multi-llm-chat-room
+cd multi-llm-chat-room
 git rev-parse HEAD
-git log -1 --oneline
-git merge-base --is-ancestor 55a7bbd34eb6ca00fb8b4d8cc7c94fc7ce00b879 HEAD && echo ancestor-ok
 git status --short
 ```
 
-`ancestor-ok` 且工作区为空，就是这份包的提交。源码 zip 没有 `.git`，哈希以本节为准。
+还原后的 HEAD 必须等于下面「当前提交」。工作区应为空。
+
+## 当前提交
+
+生命周期修复与交接在同一提交。完整哈希见下一行；若其后只有记下哈希的修订，以 `git rev-parse HEAD` 为准。
+
+`PENDING`

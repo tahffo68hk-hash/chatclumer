@@ -1,16 +1,8 @@
 #!/usr/bin/env bash
+# 只结束带有本次启动标记的进程及其子进程。端口若仍被其他进程占用，明确报错。
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-for name in backend frontend; do
-  pidfile="$ROOT/.run/${name}.pid"
-  if [[ -f "$pidfile" ]]; then
-    pid="$(cat "$pidfile")"
-    if kill -0 "$pid" 2>/dev/null; then
-      kill "$pid" 2>/dev/null || true
-      sleep 0.3
-      kill -9 "$pid" 2>/dev/null || true
-    fi
-    rm -f "$pidfile"
-  fi
-done
-echo "stopped"
+exec python3 "$ROOT/scripts/roomctl.py" stop \
+  --token-file "$ROOT/.run/instance.token" \
+  --port 43123 \
+  --port 43124
