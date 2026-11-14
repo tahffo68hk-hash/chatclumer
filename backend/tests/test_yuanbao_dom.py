@@ -753,3 +753,86 @@ def test_ab_reply_uses_answer_one_and_timeout_clears_the_composer():
     assert single["done"] is True
     assert single["text"] == "单独一句。"
     assert cleared == ""
+
+
+def test_multiline_forward_matches_across_quill_paragraphs():
+    page_html = """
+    <div data-new-input-card>
+      <div class="ql-editor ql-blank" contenteditable="true" data-placeholder="Send Message"><p><br></p></div>
+      <div id="yuanbao-send-btn" class="SendButton_sendButton__g3Lcb" aria-label="Send">Send</div>
+    </div>
+    <div class="agent-chat__list"></div>
+    """
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(channel="chrome", headless=True)
+        page = browser.new_page()
+        page.set_content(page_html)
+        page.add_script_tag(path=str(ROOT / "extension" / "yuanbao.js"))
+        result = page.evaluate(
+            """async () => {
+              const prompt = "林知秋 的公开答复：【演示回复】建议下一位由 元宝网页 补充 😀\\n请只根据这句公开答复补充或质疑。";
+              const editor = document.querySelector(".ql-editor");
+              document.execCommand = (command, _ui, value) => {
+                if (command !== "insertText") return true;
+                editor.replaceChildren();
+                String(value || "").split(/\\n+/).forEach((line) => {
+                  const para = document.createElement("p");
+                  para.textContent = line;
+                  editor.appendChild(para);
+                });
+                editor.classList.remove("ql-blank");
+                return true;
+              };
+              window.__sends = 0;
+              document.querySelector("#yuanbao-send-btn").addEventListener("pointerdown", () => {
+                window.__sends += 1;
+                const item = document.createElement("div");
+                item.className = "agent-chat__list__item--human";
+                document.querySelector(".agent-chat__list").appendChild(item);
+              });
+              const sent = await yuanbaoDispatchSend(document, prompt, 2500);
+              const joined = yuanbaoComposerText(editor);
+              const first = editor.querySelector("p").innerText;
+              const folded = document.createElement("div");
+              folded.className = "ql-editor";
+              const wide = document.createElement("p");
+              wide.textContent = "林知秋 的公开答复：【演示回复】１";
+              folded.appendChild(wide);
+              const near = "甲".repeat(120) + "。";
+              const nearNode = document.createElement("div");
+              const nearPara = document.createElement("p");
+              nearPara.textContent = "甲".repeat(120);
+              nearNode.appendChild(nearPara);
+              const shortNode = document.createElement("div");
+              const shortPara = document.createElement("p");
+              shortPara.textContent = "甲".repeat(40);
+              shortNode.appendChild(shortPara);
+              const dropped = "甲".repeat(40) + "后面整句都被丢掉了不要发送";
+              const detail = yuanbaoDiagnosis(shortNode, dropped);
+              const samples = [...detail.matchAll(/「([^」]*)」/g)].map((item) => [...item[1]].length);
+              return {
+                ok: sent.ok,
+                sends: window.__sends,
+                paragraphs: editor.querySelectorAll("p").length,
+                firstShorter: [...first].length < [...joined].length,
+                joinedHasEmoji: joined.includes("😀"),
+                folded: yuanbaoMatchState(folded, "林知秋 的公开答复：【演示回复】1"),
+                near: yuanbaoMatchState(nearNode, near),
+                refused: yuanbaoMatchState(shortNode, dropped),
+                detail,
+                samples,
+              };
+            }"""
+        )
+        browser.close()
+    assert result["ok"] is True
+    assert result["sends"] == 1
+    assert result["paragraphs"] == 2
+    assert result["firstShorter"] is True
+    assert result["joinedHasEmoji"] is True
+    assert result["folded"] == "match"
+    assert result["near"] == "match"
+    assert result["refused"] == "mismatch"
+    assert "第 40 字不同" in result["detail"]
+    assert result["samples"]
+    assert max(result["samples"]) <= 10

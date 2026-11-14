@@ -30,11 +30,15 @@ function yuanbaoControl(root, labels) {
 
 function yuanbaoNormalize(value) {
   return String(value || "")
+    .normalize("NFKC")
     .replace(/[\u200b\u200c\u200d\ufeff]/g, "")
     .replace(/\u00a0/g, " ")
-    .replace(/[\r\n]+$/g, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function yuanbaoPoints(value) {
+  return Array.from(yuanbaoNormalize(value));
 }
 
 function yuanbaoSendIn(scope) {
@@ -79,9 +83,16 @@ function yuanbaoHumans(root) {
   return [...root.querySelectorAll(".agent-chat__list__item--human")];
 }
 
-function yuanbaoComposerText(node) {
+function yuanbaoRawComposer(node) {
   if (!node) return "";
-  return yuanbaoNormalize(node.innerText || node.value || node.textContent || "");
+  if ("value" in node && !node.isContentEditable) return String(node.value || "");
+  const paragraphs = [...node.querySelectorAll("p")];
+  if (paragraphs.length) return paragraphs.map((para) => para.innerText || para.textContent || "").join("\n");
+  return node.innerText || node.textContent || "";
+}
+
+function yuanbaoComposerText(node) {
+  return yuanbaoNormalize(yuanbaoRawComposer(node));
 }
 
 function yuanbaoSendBlocked(el) {
@@ -152,20 +163,47 @@ function yuanbaoPlaceCaret(composer) {
   selection.addRange(range);
 }
 
+function yuanbaoOnlyLoose(value) {
+  return /^[\s\p{P}\p{S}]*$/u.test(String(value || ""));
+}
+
+function yuanbaoClose(expected, actual) {
+  const left = yuanbaoPoints(expected);
+  const right = yuanbaoPoints(actual);
+  if (!left.length || !right.length) return false;
+  let index = 0;
+  const shared = Math.min(left.length, right.length);
+  while (index < shared && left[index] === right[index]) index += 1;
+  if (index / left.length < 0.95) return false;
+  return yuanbaoOnlyLoose(left.slice(index).join("")) && yuanbaoOnlyLoose(right.slice(index).join(""));
+}
+
 function yuanbaoMatchState(composer, prompt) {
   const expected = yuanbaoNormalize(prompt);
   const actual = yuanbaoComposerText(composer);
-  if (actual === expected) return "match";
+  if (actual === expected || yuanbaoClose(expected, actual)) return "match";
   const compact = (value) => value.replace(/\s/g, "");
   if (expected && compact(actual) === compact(expected) + compact(expected)) return "duplicate";
   return "mismatch";
+}
+
+function yuanbaoDiffHint(expected, actual) {
+  const left = yuanbaoPoints(expected);
+  const right = yuanbaoPoints(actual);
+  let index = 0;
+  const shared = Math.min(left.length, right.length);
+  while (index < shared && left[index] === right[index]) index += 1;
+  const sample = (chars) => chars.slice(Math.max(0, index - 4), Math.max(0, index - 4) + 10).join("");
+  return `第 ${index} 字不同，待发「${sample(left)}」，实际「${sample(right)}」`;
 }
 
 function yuanbaoDiagnosis(composer, prompt) {
   const expected = yuanbaoNormalize(prompt);
   const actual = yuanbaoComposerText(composer);
   const duplicate = yuanbaoMatchState(composer, prompt) === "duplicate";
-  return `待发长度 ${expected.length}，实际长度 ${actual.length}，${duplicate ? "重复" : "不重复"}`;
+  const lengths = `待发长度 ${yuanbaoPoints(expected).length}，实际长度 ${yuanbaoPoints(actual).length}，${duplicate ? "重复" : "不重复"}`;
+  if (yuanbaoMatchState(composer, prompt) === "match") return lengths;
+  return `${lengths}，${yuanbaoDiffHint(expected, actual)}`;
 }
 
 async function yuanbaoSettle(composer, prompt, shouldAbort) {
