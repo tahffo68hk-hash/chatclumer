@@ -199,7 +199,11 @@ git status --short
 
 分组和网页桥提交后，用下面的命令核对。若其后只有记下哈希的修订，以 `git rev-parse HEAD` 为准，并确认功能提交仍是祖先。
 
-元宝结构读取和绑定状态在：
+元宝受控发送和绑定状态刷新在：
+
+`989eb266228991d8367a00058fab8495e46e0d57`
+
+元宝结构读取仍是祖先：
 
 `d4d4bce603b39a82c915b1cb2c8b8f9b82321db9`
 
@@ -220,7 +224,7 @@ git status --short
 ```bash
 git rev-parse HEAD
 git log -1 --oneline
-git merge-base --is-ancestor d4d4bce603b39a82c915b1cb2c8b8f9b82321db9 HEAD && echo ancestor-ok
+git merge-base --is-ancestor 989eb266228991d8367a00058fab8495e46e0d57 HEAD && echo ancestor-ok
 git status --short
 ```
 
