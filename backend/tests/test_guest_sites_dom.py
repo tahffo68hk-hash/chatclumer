@@ -13,6 +13,8 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
+from tests.ext_scripts import add_adapters
+
 ROOT = Path(__file__).resolve().parents[2]
 PROMPT = "用一句话介绍你自己"
 
@@ -130,6 +132,7 @@ def _open(playwright, spec):
           window.chrome = { runtime: { id: "room", sendMessage(m) { window.__progress.push(m); }, onMessage: { addListener() {}, removeListener() {} } } };
         }"""
     )
+    add_adapters(page)
     page.add_script_tag(path=str(ROOT / "extension" / "guest.js"))
     page.add_script_tag(path=str(ROOT / "extension" / "content.js"))
     return browser, page

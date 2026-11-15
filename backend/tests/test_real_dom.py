@@ -17,6 +17,8 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
+from tests.ext_scripts import add_adapters
+
 ROOT = Path(__file__).resolve().parents[2]
 FIX = Path(__file__).resolve().parent / "fixtures" / "real_dom"
 PROMPT = "你好，请用一句话回答"
@@ -62,6 +64,7 @@ def open_page(playwright, site):
           window.chrome = { runtime: { id: "room", sendMessage() {}, onMessage: { addListener() {}, removeListener() {} } } };
         }"""
     )
+    add_adapters(page)
     page.add_script_tag(path=str(ROOT / "extension" / spec["script"]))
     page.add_script_tag(path=str(ROOT / "extension" / "content.js"))
     return browser, page
@@ -204,6 +207,7 @@ def test_real_dom_has_no_false_wall(name):
         for state in ("0-empty", "1-typed", "2-streaming", "3-done"):
             _, html = load(name, state)
             page.set_content(html, wait_until="domcontentloaded")
+            add_adapters(page)
             page.add_script_tag(path=str(ROOT / "extension" / "guest.js"))
             gates.append(page.evaluate("(site) => guestGate(site, document)", site))
         browser.close()
@@ -250,6 +254,7 @@ def test_real_dom_zhipu_unregistered_input_is_not_clicked():
         page.route("**/*", lambda route: route.fulfill(status=200, content_type="text/html; charset=utf-8", body=html)
                    if route.request.resource_type == "document" else route.abort())
         page.goto(url, wait_until="domcontentloaded")
+        add_adapters(page)
         page.add_script_tag(path=str(ROOT / "extension" / "guest.js"))
         page.evaluate(SWAP, [SITES["zhipu"]["send"], [], PROMPT])
         result = page.evaluate(

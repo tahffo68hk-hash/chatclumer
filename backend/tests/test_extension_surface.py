@@ -53,16 +53,18 @@ def test_optional_hosts_do_not_get_a_static_content_script():
     assert "memberId" in remembered and "tabKey" in remembered
     assert "code" not in remembered
     guest = (ROOT / "extension" / "guest.js").read_text()
+    registry = json.loads((ROOT / "extension" / "adapters" / "registry.json").read_text())
     for site in ("qwen", "chatgpt", "wenxin", "zhipu", "zai"):
-        assert f"{site}: {{" in guest
+        assert registry["sites"][site]["engine"] == "guest"
     assert "document.body" not in guest
     assert "已填入，未发送" in guest
-    assert "需要先在页面上完成确认" in guest
+    assert any("需要先在页面上完成确认" in g["detail"] for g in registry["sites"]["qwen"]["gates"])
+    assert "adapters/registry.js" in background and "adapters/runtime.js" in background
     assert "guestDispatchSend" in content
     assert "guest.js" in background
     for origin in ("https://chat.qwen.ai", "https://chatgpt.com", "https://wenxin.baidu.com", "https://chat.baidu.com", "https://chatglm.cn", "https://chat.z.ai"):
         assert f"{origin}/*" in manifest["optional_host_permissions"]
         assert origin in popup
-    assert manifest["version"] == "0.4.4"
+    assert manifest["version"] == "0.5.0"
     assert 'url.startsWith("https://chat.baidu.com/")) return "wenxin"' in content
     assert '"https://chat.baidu.com",' in background

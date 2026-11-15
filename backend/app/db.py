@@ -173,6 +173,7 @@ class Database:
         self._ensure_column("members", "web_conversation", "TEXT")
         self._ensure_column("members", "web_auto", "INTEGER NOT NULL DEFAULT 0")
         self._ensure_column("members", "web_seen_at", "TEXT")
+        self._ensure_column("members", "web_health", "TEXT")
         self._ensure_column("sessions", "parent_started_at", "TEXT")
         self._ensure_column("sessions", "parent_deadline_at", "TEXT")
         self._ensure_column("sessions", "run_tokens_known", "INTEGER NOT NULL DEFAULT 1")
@@ -282,6 +283,11 @@ class Database:
         row["enabled"] = bool(row["enabled"])
         row["web_auto"] = bool(row.get("web_auto"))
         row["web_link"] = _web_link(row)
+        raw = row.pop("web_health", None)
+        try:
+            row["web_health"] = json.loads(raw) if raw else None
+        except (TypeError, ValueError):
+            row["web_health"] = None
         return row
 
     def create_session(self, **fields: Any) -> dict:

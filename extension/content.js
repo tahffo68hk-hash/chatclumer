@@ -135,7 +135,7 @@ const adapters = {
   },
 };
 
-// 游客站点共用 guest.js。每个站的选择器在 GUEST_SITES 里；没装 guest.js 时这些站一律不发送。
+// 游客站点共用 guest.js。每个站的选择器在 adapters/registry.json 里；没装 guest.js 时这些站一律不发送。
 function guestAdapter(site) {
   const ready = () => typeof guestDispatchSend === "function";
   return {
