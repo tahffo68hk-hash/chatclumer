@@ -512,3 +512,40 @@ def test_summary_mentions_disagreement():
     assert "质疑" in text
     assert "可能" in text
     assert "【本地回顾 · 未额外请求模型】" in text
+
+
+class _CountingProvider:
+    def __init__(self):
+        self.calls = 0
+
+    async def stream(self, req, cancel, stale):
+        self.calls += 1
+        yield f"RUNMARK{self.calls} 建议先做第{self.calls}件事。"
+
+
+@pytest.mark.asyncio
+async def test_local_summary_only_uses_the_current_run(tmp_path):
+    # 同一房间第二次发起时，本地回顾的「主要结论」不能引用上一次运行的答复。
+    provider = _CountingProvider()
+    db, engine, room = make(tmp_path, provider, mode="independent", max_rounds=1, max_ai_messages=10, max_seconds=30)
+    a = add_member(db, room["id"], "甲")
+    b = add_member(db, room["id"], "乙", "工程师")
+    await engine.ingest_message(room["id"], "第一个问题")
+    first = await finish(engine, room["id"])
+    # 第二次换了一批成员（实页上是先 Qwen/Z.ai/DeepSeek，后文心/智谱）。
+    db.update_member(a["id"], {"enabled": False})
+    db.update_member(b["id"], {"enabled": False})
+    add_member(db, room["id"], "丙")
+    add_member(db, room["id"], "丁", "工程师")
+    await engine.ingest_message(room["id"], "第二个问题")
+    second = await finish(engine, room["id"])
+    assert first["run_token"] != second["run_token"]
+    assert provider.calls == 4
+    rows = summaries(db, room["id"])
+    assert len(rows) == 2
+    old, new = rows[0]["content"], rows[1]["content"]
+    assert "RUNMARK1" in old and "RUNMARK2" in old
+    assert "RUNMARK3" in new and "RUNMARK4" in new
+    assert "RUNMARK1" not in new and "RUNMARK2" not in new
+    assert "甲" not in new and "乙" not in new
+    assert "第二个问题" in new and "第一个问题" not in new

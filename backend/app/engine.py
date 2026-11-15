@@ -1294,7 +1294,7 @@ class RoomEngine:
                 int(session["current_round"] or 0),
                 int(session["context_version"]),
                 int(session["max_ai_messages"]),
-                self.db.model_transcript(session_id),
+                self._run_transcript(session_id, run_token),
             )
             if code in {"ok", "ok_repeat"} or self.db.has_summary(run_token):
                 self._normalize_summary(session_id, run_token, reason)
@@ -1378,6 +1378,25 @@ class RoomEngine:
             return False, "消息额度已用完，未再请求总结模型。"
         return True, ""
 
+    def _run_transcript(self, session_id: str, run_token: str | None) -> list[dict]:
+        """Only this run: the user message that started it, later user messages, and this run's AI replies.
+
+        Earlier runs in the same room stay in the timeline but are not summarised again.
+        """
+        transcript = self.db.model_transcript(session_id)
+        first = next((i for i, m in enumerate(transcript) if run_token and m.get("run_token") == run_token), None)
+        users = [i for i, m in enumerate(transcript) if m["author_type"] == "user"]
+        if first is None:
+            start = users[-1] if users else len(transcript)
+        else:
+            before = [i for i in users if i <= first]
+            start = before[-1] if before else first
+        return [
+            m
+            for m in transcript[start:]
+            if m["author_type"] == "user" or m.get("run_token") == run_token
+        ]
+
     def _normalize_summary(self, session_id: str, run_token: str, reason: str) -> None:
         messages = [
             item
@@ -1392,7 +1411,7 @@ class RoomEngine:
         if all(item in text for item in headings):
             return
         replacement = build_summary(
-            self.db.model_transcript(session_id),
+            self._run_transcript(session_id, run_token),
             reason,
             note="总结模型没有完整六段结构，已改用本地回顾，没有再次请求。",
         )
@@ -1403,7 +1422,7 @@ class RoomEngine:
         if self.db.has_summary(run_token):
             return
         session = self.db.get_session(session_id)
-        body = build_summary(self.db.model_transcript(session_id), reason, note=note)
+        body = build_summary(self._run_transcript(session_id, run_token), reason, note=note)
         message = self.db.add_message(
             {
                 "session_id": session_id,
