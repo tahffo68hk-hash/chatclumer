@@ -17,7 +17,7 @@ function siteFrom(url) {
   if (url.startsWith("https://chatglm.cn/")) return "zhipu";
   if (url.startsWith("https://chat.qwen.ai/")) return "qwen";
   if (url.startsWith("https://chatgpt.com/") || url.startsWith("https://chat.openai.com/")) return "chatgpt";
-  if (url.startsWith("https://wenxin.baidu.com/") || url.startsWith("https://yiyan.baidu.com/")) return "wenxin";
+  if (url.startsWith("https://wenxin.baidu.com/") || url.startsWith("https://yiyan.baidu.com/") || url.startsWith("https://chat.baidu.com/")) return "wenxin";
   if (url.startsWith("https://chat.z.ai/")) return "zai";
   return "";
 }

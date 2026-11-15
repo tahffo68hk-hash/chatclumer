@@ -85,7 +85,7 @@ const RESUME_PATHS = {
   deepseek: /\/a\/chat\/s\//,
   qwen: /\/c\//,
   chatgpt: /\/(c|uc)\//,
-  wenxin: /\/search\//,
+  wenxin: /\/search\/|chat\.baidu\.com\//,
   zai: /\/c\//,
   zhipu: /chatglm\.cn\//,
 };
@@ -139,6 +139,7 @@ const GUEST_ORIGINS = new Set([
   "https://chat.openai.com",
   "https://wenxin.baidu.com",
   "https://yiyan.baidu.com",
+  "https://chat.baidu.com",
   "https://chatglm.cn",
   "https://chat.z.ai",
 ]);

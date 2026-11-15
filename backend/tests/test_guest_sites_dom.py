@@ -112,6 +112,8 @@ SITES = {
     },
 }
 
+SITES["wenxin_chat_baidu"] = {**SITES["wenxin"], "url": "https://chat.baidu.com/", "site": "wenxin"}
+
 WORDS = ["我是", "一个", "AI 助手，", "很高兴认识你。"]
 
 
@@ -188,7 +190,7 @@ def test_guest_site_sends_once_and_reads_the_answer(site):
     spec = SITES[site]
     with sync_playwright() as playwright:
         browser, page = _open(playwright, spec)
-        result = page.evaluate(DRIVER, [site, spec, PROMPT, WORDS])
+        result = page.evaluate(DRIVER, [spec.get("site", site), spec, PROMPT, WORDS])
         browser.close()
     assert result["status"] == "complete", result
     assert result["text"] == "我是一个AI 助手，很高兴认识你。"

@@ -21,7 +21,7 @@ SITES = {
     "doubao": {"origins": ["https://www.doubao.com"], "label": "豆包网页"},
     "yuanbao": {"origins": ["https://yuanbao.tencent.com"], "label": "腾讯元宝网页"},
     "zhipu": {"origins": ["https://chatglm.cn"], "label": "智谱清言网页"},
-    "wenxin": {"origins": ["https://wenxin.baidu.com", "https://yiyan.baidu.com"], "label": "文心网页"},
+    "wenxin": {"origins": ["https://chat.baidu.com", "https://wenxin.baidu.com", "https://yiyan.baidu.com"], "label": "文心网页"},
     "zai": {"origins": ["https://chat.z.ai"], "label": "Z.ai 网页"},
 }
 
@@ -61,7 +61,7 @@ SITE_STATUS = {
     },
     "wenxin": {
         "state": "guest_adapter",
-        "detail": "2026-11-15 游客实页 https://wenxin.baidu.com/（yiyan.baidu.com 会跳到这里）可聊天，地址到 /search/<id>。扩展 0.4.0 接入游客自动发送，实页端到端还没有再核对。",
+        "detail": "2026-11-15 游客实页 https://wenxin.baidu.com/（yiyan.baidu.com 会跳到这里）可聊天，地址到 /search/<id>。随后实页绑定时已跳到 https://chat.baidu.com，扩展 0.4.1 起三个源都认。扩展 0.4.0 接入游客自动发送，实页端到端还没有再核对。",
     },
     "zai": {
         "state": "guest_adapter",

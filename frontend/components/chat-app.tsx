@@ -121,7 +121,7 @@ const WEB_SITES = [
   { id: "gemini", label: "Gemini", origin: "https://gemini.google.com/app" },
   { id: "yuanbao", label: "腾讯元宝", origin: "https://yuanbao.tencent.com/chat/" },
   { id: "zhipu", label: "智谱清言 chatglm.cn（游客）", origin: "https://chatglm.cn/" },
-  { id: "wenxin", label: "文心 wenxin.baidu.com（游客）", origin: "https://wenxin.baidu.com/" },
+  { id: "wenxin", label: "文心 chat.baidu.com（游客）", origin: "https://chat.baidu.com/" },
   { id: "zai", label: "Z.ai chat.z.ai（游客）", origin: "https://chat.z.ai/" },
   { id: "doubao", label: "豆包", origin: "https://www.doubao.com/chat/" },
   { id: "qwen", label: "Qwen（游客）", origin: "https://chat.qwen.ai/" },

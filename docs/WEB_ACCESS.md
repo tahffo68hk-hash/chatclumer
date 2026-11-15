@@ -49,7 +49,7 @@
 | --- | --- | --- | --- |
 | Qwen https://chat.qwen.ai/ | 游客（/c/guest） | 0.4.0 自动发送，夹具通过，实页待核对。年龄确认弹窗不点，回报「需要先在页面上完成确认」 | `textarea.message-input-textarea`；发送 `button.send-button[aria-label=Send]`（`disabled`）；停止 `button.stop-button`；回复 `.qwen-chat-message-assistant .response-message-content.phase-answer`；完成 `.response-message-footer button[aria-label=Copy]` |
 | ChatGPT https://chatgpt.com/ | 游客（未登录版式，/uc/<id>） | 同上 | `textarea#mobile-composer-prompt`；发送：图标 `use[href*=lightweight-composer-send]` 所在按钮；停止：`composer-stop` 图标；回复 `li[data-message-role=assistant] [data-assistant-markdown-root]`；完成 `data-message-complete` 且无 `aria-busy=true` |
-| 文心 https://wenxin.baidu.com/（yiyan.baidu.com 跳转） | 游客（/search/<id>） | 同上 | `textarea#chat-textarea`；发送 `span.ci-submit-button`（可用时内含 `.ci-submit-button-ai-active`）；回复 `.ai-entry-block.ai-markdown .cosd-markdown-content`（「正在思考」视为空）；完成 `.chat-qa-container [data-testid=menu-btn-copy]` |
+| 文心 https://chat.baidu.com/（wenxin.baidu.com、yiyan.baidu.com 现都跳到这里；0.4.1 起三个源都认） | 游客（wenxin 时期地址到 /search/<id>） | 同上。选择器取自 wenxin.baidu.com 时期的页面，chat.baidu.com 上待实页核对 | `textarea#chat-textarea`；发送 `span.ci-submit-button`（可用时内含 `.ci-submit-button-ai-active`）；回复 `.ai-entry-block.ai-markdown .cosd-markdown-content`（「正在思考」视为空）；完成 `.chat-qa-container [data-testid=menu-btn-copy]` |
 | 智谱清言 https://chatglm.cn/ | 游客（访客_xxxxxx） | 0.4.0 起自动发送（以前只允许人工），同上 | `.input-box-inner textarea`；发送 `div.enter.is-main-chat`；回复 `.conversation.answer .answer-content-wrap .markdown-body`，排除 `.text-advance-thinking-content`；完成 `.conversation-item .interact-container .copy` |
 | Z.ai https://chat.z.ai/ | 游客（页头 Guest，/c/<id>） | 同上 | `textarea#chat-input`；发送 `button#send-message-button`（`disabled`；空框却可点视为停止键）；回复 `.chat-assistant .chat-markdown`，排除 `.thinking-chain-container`；完成 `button[aria-label=Copy]` / `Regenerate` |
 | 元宝 / DeepSeek / 豆包 | 要先在该标签页登录一次 | 元宝、豆包实页已通过；DeepSeek 0.3.2 修了完成判定，待实页再核对 | 见 `yuanbao.js`、`deepseek.js`、`doubao.js` |
@@ -79,7 +79,7 @@
 - 网页成员在添加或编辑时填写来源、页面地址、绑定键和受控自动发送。保存会调用 `/api/members/{id}/web-bind`。成员卡片上的成员 ID 和绑定键可以选中复制。状态分为未绑定、已绑定标签页、掉线。分步说明在成员栏和设置里的「连接网页 AI」。
 - 手机可以打开群聊。网页桥仍要这台开着扩展的电脑。拆出成员默认解除原标签页，绑定新会话前不会再向原网页发送。选择「沿用已有记忆」才会继续用原来的标签，并且页面会说明原网页还记得已读内容。
 - 设了 token 上限时，网页成员直接拒绝，不会把字符数当成精确 token。分支房间的消息条数和时间不因合并或再次开始而清零。
-- 清单里的 content_scripts 只有本机夹具和 Gemini。元宝、DeepSeek、豆包、智谱、Qwen、ChatGPT、文心、Z.ai 在 optional_host_permissions 里。绑定这些站点时，扩展会请求该源的主机权限，再用 `chrome.scripting.registerContentScripts` 登记对应脚本，并注入当前标签。没有授予就不会注入。DeepSeek 注入 `deepseek.js`，豆包注入 `doubao.js`，游客站注入 `guest.js`。实页发送还没有再核对。
+- 清单里的 content_scripts 只有本机夹具和 Gemini。元宝、DeepSeek、豆包、智谱、Qwen、ChatGPT、文心（chat.baidu.com / wenxin.baidu.com / yiyan.baidu.com）、Z.ai 在 optional_host_permissions 里。绑定这些站点时，扩展会请求该源的主机权限，再用 `chrome.scripting.registerContentScripts` 登记对应脚本，并注入当前标签。没有授予就不会注入。DeepSeek 注入 `deepseek.js`，豆包注入 `doubao.js`，游客站注入 `guest.js`。实页发送还没有再核对。
 - 2026-11-15 起元宝游客聊天需要先在该标签页登录一次。2026-11-15 07:46，扩展 0.2.9 在已登录的实页上核对了自动发送、A/B 读回（答案 1）和第三轮转发：各发送一次，读回与页面一致，元宝用户气泡与房间任务都是 2，没有多余发送，结束后输入框是空的。网页转发仍压成一段，超过约 800 字会截断。网页读取上限 90 秒，桥接等待 120 秒。同一轮失败后不再转发，除非重新发起。智谱游客可用，扩展不自动点发送。DeepSeek 和豆包在 2026-11-15 08:30 由协调方登录后做了只读 DOM 记录。扩展 0.3.0 按该结构接入，实页发送和读回还没有再核对。未登录不发送。豆包打开 `/security/doubao-region-ban` 时只回报「豆包当前网络地区不可用」。
 - 成员保存后是「已配置，等待扩展绑定」。扩展心跳确认标签页仍在，才显示「已绑定标签页」。大约 20 秒没有心跳，或标签页已关闭，显示「掉线」。同名或绑定校验失败时，错误留在成员对话框里；新建失败不会留下半个成员。
 - Qwen 只写在 `docs/qwen-run.json`，是手动 DOM，不是扩展端到端。

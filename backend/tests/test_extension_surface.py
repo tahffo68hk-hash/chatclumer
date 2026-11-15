@@ -60,7 +60,9 @@ def test_optional_hosts_do_not_get_a_static_content_script():
     assert "需要先在页面上完成确认" in guest
     assert "guestDispatchSend" in content
     assert "guest.js" in background
-    for origin in ("https://chat.qwen.ai", "https://chatgpt.com", "https://wenxin.baidu.com", "https://chatglm.cn", "https://chat.z.ai"):
+    for origin in ("https://chat.qwen.ai", "https://chatgpt.com", "https://wenxin.baidu.com", "https://chat.baidu.com", "https://chatglm.cn", "https://chat.z.ai"):
         assert f"{origin}/*" in manifest["optional_host_permissions"]
         assert origin in popup
-    assert manifest["version"] == "0.4.0"
+    assert manifest["version"] == "0.4.1"
+    assert 'url.startsWith("https://chat.baidu.com/")) return "wenxin"' in content
+    assert '"https://chat.baidu.com",' in background
