@@ -82,3 +82,80 @@ document.getElementById("bind").addEventListener("click", async () => {
     document.getElementById("status").textContent = `已绑定 ${origin}。${how}房间要等扩展心跳后才显示已绑定标签页。`;
   });
 });
+
+// 页面检查和诊断快照：都在当前标签页里执行，先确认内容脚本已装上（需要该站点的主机权限）。
+async function currentTabReady() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const origin = new URL(tab.url).origin;
+  if (!ALLOWED.includes(origin)) return { error: "这个站点不在允许列表" };
+  if (!STATIC_ORIGINS.has(origin)) {
+    const granted = await chrome.permissions.request({ origins: [`${origin}/*`] });
+    if (!granted) return { error: "没有授予这个站点，无法检查" };
+  }
+  const ready = await chrome.runtime.sendMessage({ type: "ensure-script", origin, tabId: tab.id });
+  if (!ready?.ok) return { error: ready?.detail || "内容脚本没有装上" };
+  return { tab, origin };
+}
+
+function describeHealth(h) {
+  if (!h) return "页面没有回应";
+  const lines = [`${h.label || h.site}：${h.ok ? "通过" : "有问题"}（注册表 ${h.registry?.version || "?"}，${h.registry?.source || ""}）`, h.detail || ""];
+  for (const [role, r] of Object.entries(h.roles || {})) {
+    lines.push(`  ${role}: ${r.found ? `命中 ${r.found} 个（第 ${r.index + 1} 个选择器）` : "没找到"}`);
+  }
+  if (h.registry?.note) lines.push(h.registry.note);
+  return lines.join("\n");
+}
+
+document.getElementById("health").addEventListener("click", async () => {
+  const out = document.getElementById("health-out");
+  const ready = await currentTabReady();
+  if (ready.error) {
+    out.textContent = ready.error;
+    return;
+  }
+  chrome.tabs.sendMessage(ready.tab.id, { type: "health" }, (h) => {
+    out.textContent = chrome.runtime.lastError ? "页面没有回应" : describeHealth(h);
+  });
+});
+
+document.getElementById("dump").addEventListener("click", async () => {
+  const out = document.getElementById("health-out");
+  const ready = await currentTabReady();
+  if (ready.error) {
+    out.textContent = ready.error;
+    return;
+  }
+  chrome.tabs.sendMessage(ready.tab.id, { type: "dump" }, (result) => {
+    if (chrome.runtime.lastError || !result || !result.html) {
+      out.textContent = "没有拿到快照";
+      return;
+    }
+    const blob = new Blob([result.html], { type: "text/html" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `chatclumer-dump-${result.meta.site || "site"}-${Date.now()}.html`;
+    a.click();
+    out.textContent = `已导出 ${result.meta.site} 聊天栏快照（正文已打码）。\n${describeHealth(result.meta.health)}`;
+  });
+});
+
+function showRegistry(status) {
+  const el = document.getElementById("registry");
+  const version = chrome.runtime.getManifest().version;
+  el.textContent = status
+    ? `扩展 ${version}。${status.detail || ""}（${status.checked_at || ""}）`
+    : `扩展 ${version}。还没有检查过远端注册表。`;
+}
+
+chrome.storage.local.get(["registryStatus", "registryUrl"]).then(({ registryStatus, registryUrl }) => {
+  showRegistry(registryStatus);
+  document.getElementById("registry-url").value = registryUrl || "";
+  document.getElementById("registry-url").placeholder = "默认：chatclumer 仓库里的 registry.json";
+});
+
+document.getElementById("registry-save").addEventListener("click", async () => {
+  const url = document.getElementById("registry-url").value.trim();
+  const status = await chrome.runtime.sendMessage({ type: "registry-set-url", url });
+  showRegistry(status);
+});

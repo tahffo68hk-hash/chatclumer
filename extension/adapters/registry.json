@@ -1,0 +1,469 @@
+{
+  "schema": "chatclumer.adapters",
+  "schema_version": 1,
+  "version": "2026.11.15.1",
+  "min_extension": "0.5.0",
+  "source": "2026-11-15 实页 DOM 导出（dom-dumps）",
+  "common": {
+    "dialogs": [
+      "[role='dialog']",
+      "[aria-modal='true']",
+      "dialog[open]",
+      ".ant-modal"
+    ],
+    "toasts": [
+      "[role='alert']",
+      "[role='status']",
+      ".ant-message",
+      ".ant-notification",
+      "[class*='toast' i]",
+      "[class*='notice' i]"
+    ],
+    "captcha_boxes": [
+      "[class*='captcha' i]",
+      "[id*='captcha' i]",
+      "[id^='nc_']",
+      "[class*='nc-container']",
+      "[class*='verify' i]"
+    ],
+    "captcha": {
+      "source": "drag the slider|slide to verify|向右滑动|拖动滑块|滑动完成验证|verify you are human|人机验证|安全验证",
+      "flags": "i"
+    },
+    "login": {
+      "source": "log in or sign up|sign up to continue|log in to continue|sign in to continue|登录后(继续|即可|使用)|请先登录|登录以继续|扫码登录|手机号登录|验证码登录|使用.{0,8}账号登录",
+      "flags": "i"
+    },
+    "not_login": {
+      "source": "personali[sz]ed|clear current chat",
+      "flags": "i"
+    }
+  },
+  "sites": {
+    "qwen": {
+      "engine": "guest",
+      "label": "Qwen",
+      "origins": [
+        "https://chat.qwen.ai"
+      ],
+      "roles": {
+        "composer": [
+          "textarea.message-input-textarea",
+          "textarea[placeholder='Ask Qwen']"
+        ],
+        "send": [
+          "button.send-button[aria-label='Send']"
+        ],
+        "stop": [
+          "button.stop-button[aria-label='Stop']",
+          "button[data-aes-exp='expInputStop']"
+        ],
+        "users": [
+          ".qwen-chat-message-user"
+        ],
+        "user_text": [
+          "p.user-message-content"
+        ],
+        "assistants": [
+          ".qwen-chat-message-assistant"
+        ],
+        "body": [
+          ".response-message-content.phase-answer",
+          ".response-message-content .qwen-markdown"
+        ],
+        "exclude": [
+          "[class*='thinking']"
+        ],
+        "done_near": [
+          ".response-message-footer button[aria-label='Copy']",
+          "button[class*='action-control-container-copy']"
+        ]
+      },
+      "streaming": [
+        {
+          "when": {
+            "has": ".response-loading"
+          },
+          "value": true
+        }
+      ],
+      "conv_url": {
+        "source": "/c/(?!new-chat)[\\w-]{8,}",
+        "flags": ""
+      },
+      "gates": [
+        {
+          "pattern": {
+            "source": "do not have permission to access this resource|没有权限访问",
+            "flags": "i"
+          },
+          "where": "toast",
+          "detail": "千问游客发送被拒绝，可能需要登录（页面提示没有权限）。扩展没有重发"
+        },
+        {
+          "pattern": {
+            "source": "confirm your age|确认.{0,6}年龄|年龄确认",
+            "flags": "i"
+          },
+          "where": "dialog",
+          "detail": "需要先在页面上完成确认（Qwen 年龄确认），扩展不会替你点"
+        }
+      ]
+    },
+    "chatgpt": {
+      "engine": "guest",
+      "label": "ChatGPT",
+      "origins": [
+        "https://chatgpt.com",
+        "https://chat.openai.com"
+      ],
+      "roles": {
+        "composer": [
+          "textarea#mobile-composer-prompt",
+          "textarea[name='prompt'][data-mobile-composer-prompt]"
+        ],
+        "send": [
+          "button[data-composer-submit]"
+        ],
+        "users": [
+          "li[data-message-role='user']"
+        ],
+        "user_text": [
+          "[data-user-message-copy]"
+        ],
+        "assistants": [
+          "li[data-message-role='assistant']"
+        ],
+        "body": [
+          "[data-assistant-markdown-root]"
+        ]
+      },
+      "stop_find": [
+        {
+          "sel": "button[data-composer-submit]",
+          "attr": "aria-label",
+          "pattern": {
+            "source": "stop",
+            "flags": "i"
+          }
+        },
+        {
+          "sel": "button[data-testid='stop-button'], button[aria-label='Stop generating']"
+        }
+      ],
+      "streaming": [
+        {
+          "when": {
+            "has": "[aria-busy='true']"
+          },
+          "value": true
+        },
+        {
+          "when": {
+            "self": "[data-message-complete]"
+          },
+          "value": false
+        }
+      ],
+      "done": {
+        "all": [
+          {
+            "self": "[data-message-complete]"
+          },
+          {
+            "not": {
+              "has": "[aria-busy='true']"
+            }
+          }
+        ]
+      },
+      "conv_url": {
+        "source": "/(c|uc)/[\\w-]{8,}",
+        "flags": ""
+      },
+      "gates": [
+        {
+          "pattern": {
+            "source": "sign in to continue|log in to continue",
+            "flags": "i"
+          },
+          "where": "page",
+          "detail": "ChatGPT 需要登录后才能继续（游客额度可能用完）。扩展没有写入，也不会重试"
+        }
+      ]
+    },
+    "wenxin": {
+      "engine": "guest",
+      "label": "文心",
+      "origins": [
+        "https://wenxin.baidu.com",
+        "https://chat.baidu.com",
+        "https://yiyan.baidu.com"
+      ],
+      "roles": {
+        "composer": [
+          "textarea#chat-textarea"
+        ],
+        "send": [
+          "span.ci-submit-button"
+        ],
+        "users": [
+          ".cs-question-bubble"
+        ],
+        "user_text": [
+          ".cs-question-pure-text"
+        ],
+        "assistants": [
+          ".conversation-flow-answer-container"
+        ],
+        "body": [
+          ".ai-entry-block.ai-markdown .cosd-markdown-content",
+          ".ai-entry-block.ai-markdown .marklang"
+        ]
+      },
+      "disabled": {
+        "not": {
+          "has": "img#ci-submit-button-ai"
+        }
+      },
+      "stop_find": [
+        {
+          "sel": "span.ci-submit-button img.ci-submit-pause",
+          "closest": "span.ci-submit-button"
+        }
+      ],
+      "flags": {
+        "writer": "exec",
+        "guard_other": true,
+        "click_inner": "img#ci-submit-button-ai"
+      },
+      "placeholder_text": {
+        "source": "^正在思考",
+        "flags": ""
+      },
+      "streaming": [
+        {
+          "when": {
+            "closest": ".chat-qa-container[data-chat-status]",
+            "attr": "data-chat-status",
+            "equals": "GENERATING"
+          },
+          "value": true
+        },
+        {
+          "when": {
+            "closest": ".chat-qa-container[data-chat-status]",
+            "attr": "data-chat-status",
+            "equals": "COMPLETE"
+          },
+          "value": false
+        }
+      ],
+      "done": {
+        "closest": ".chat-qa-container[data-chat-status]",
+        "attr": "data-chat-status",
+        "equals": "COMPLETE"
+      },
+      "conv_url": {
+        "source": "/search/\\d+",
+        "flags": ""
+      }
+    },
+    "zhipu": {
+      "engine": "guest",
+      "label": "智谱清言",
+      "origins": [
+        "https://chatglm.cn"
+      ],
+      "roles": {
+        "composer": [
+          "#search-input-box textarea",
+          ".input-box-inner textarea"
+        ],
+        "send": [
+          "#search-input-box div.enter.is-main-chat",
+          "div.enter.is-main-chat"
+        ],
+        "users": [
+          ".conversation.question"
+        ],
+        "user_text": [
+          ".question-txt"
+        ],
+        "assistants": [
+          ".answer[id^='row-answer-']"
+        ],
+        "body": [
+          ".answer-content-wrap .markdown-body"
+        ],
+        "exclude": [
+          ".text-advance-thinking-content",
+          ".advance-thinking"
+        ]
+      },
+      "disabled": {
+        "any": [
+          {
+            "self": ".searching"
+          },
+          {
+            "has": ".enter-icon-container.empty"
+          }
+        ]
+      },
+      "stop_find": [
+        {
+          "sel": "div.enter.is-main-chat.searching"
+        }
+      ],
+      "flags": {
+        "writer": "exec",
+        "guard_other": true,
+        "wait_send_enabled": true,
+        "click_center": true
+      },
+      "streaming": [
+        {
+          "when": {
+            "has": ".answer-loading"
+          },
+          "value": true
+        },
+        {
+          "when": {
+            "has": ".interact-container .copy, .interact-container .regenerate"
+          },
+          "value": false
+        }
+      ],
+      "done": {
+        "all": [
+          {
+            "not": {
+              "has": ".answer-loading"
+            }
+          },
+          {
+            "has": ".interact-container .copy, .interact-container .regenerate"
+          }
+        ]
+      },
+      "conv_url": {
+        "source": "[?&]cid=",
+        "flags": ""
+      }
+    },
+    "zai": {
+      "engine": "guest",
+      "label": "Z.ai",
+      "origins": [
+        "https://chat.z.ai"
+      ],
+      "roles": {
+        "composer": [
+          "textarea#chat-input"
+        ],
+        "send": [
+          "button#send-message-button"
+        ],
+        "stop": [
+          "button[aria-label='Stop'][data-slot='button']"
+        ],
+        "users": [
+          ".user-message"
+        ],
+        "user_text": [
+          "[data-user-bubble]"
+        ],
+        "assistants": [
+          ".chat-assistant"
+        ],
+        "host": [
+          "div[id^='message-']"
+        ],
+        "body": [
+          ".chat-markdown"
+        ],
+        "exclude": [
+          ".thinking-chain-container"
+        ],
+        "done_near": [
+          "button[aria-label='Copy']",
+          "button[aria-label='Regenerate']"
+        ]
+      },
+      "streaming": [
+        {
+          "when": {
+            "has": "._common-loading"
+          },
+          "value": true
+        }
+      ],
+      "conv_url": {
+        "source": "/c/[\\w-]{8,}",
+        "flags": ""
+      }
+    },
+    "deepseek": {
+      "engine": "builtin",
+      "label": "DeepSeek",
+      "origins": [
+        "https://chat.deepseek.com"
+      ],
+      "roles": {
+        "composer": [
+          "textarea[placeholder='Message DeepSeek']"
+        ],
+        "send": [
+          "div[role='button'].ds-button--circle"
+        ],
+        "messages": [
+          ".ds-message"
+        ]
+      }
+    },
+    "doubao": {
+      "engine": "builtin",
+      "label": "豆包",
+      "origins": [
+        "https://www.doubao.com"
+      ],
+      "roles": {
+        "composer": [
+          "[data-testid='chat_input_input'] [contenteditable='true']"
+        ],
+        "send": [
+          "button[data-testid='chat_input_send_button']"
+        ],
+        "messages": [
+          "[data-testid='send_message']",
+          "[data-testid='receive_message']"
+        ]
+      }
+    },
+    "yuanbao": {
+      "engine": "builtin",
+      "label": "元宝",
+      "origins": [
+        "https://yuanbao.tencent.com"
+      ],
+      "roles": {
+        "composer": [
+          "#searchbar-editor .ql-editor[contenteditable='true']",
+          "[data-new-input-card] .ql-editor[contenteditable='true']",
+          ".ql-editor[contenteditable='true']"
+        ],
+        "send": [
+          "#yuanbao-send-btn",
+          "[data-new-input-control='send'] [aria-label='Send']",
+          "[data-new-input-control='send'] [aria-label='发送']"
+        ],
+        "messages": [
+          ".agent-chat__list__item--human",
+          ".agent-chat__list__item--ai"
+        ]
+      }
+    }
+  }
+}

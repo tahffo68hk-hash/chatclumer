@@ -207,6 +207,7 @@ class TabBeat(BaseModel):
     tab_key: str
     origin: str
     alive: bool = True
+    health: dict | None = None
 
 
 class TabsIn(BaseModel):
@@ -386,6 +387,14 @@ def create_app(db_path: str | None = None, secrets_path: str | None = None, prov
     @app.get("/api/ext/sites")
     def ext_sites():
         return {"sites": SITE_STATUS}
+
+    @app.get("/api/adapters/registry")
+    def adapter_registry():
+        # 内置的适配器注册表（只是数据）。桌面壳或别的客户端可以读同一份。
+        path = ROOT.parent / "extension" / "adapters" / "registry.json"
+        if not path.exists():
+            raise HTTPException(404, "没有内置注册表")
+        return json.loads(path.read_text(encoding="utf-8"))
 
     def _ext_same_machine(request: Request) -> None:
         origin = request.headers.get("origin")

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import secrets
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
@@ -99,6 +100,39 @@ def site_for_origin(origin: str) -> str | None:
     return None
 
 
+HEALTH_ROLES = {"composer", "send", "users", "assistants", "messages", "body", "user_text"}
+
+
+def clean_health(raw) -> dict | None:
+    """Keep only the dry-run page check fields (no page text). The extension sends this with the heartbeat."""
+    if not isinstance(raw, dict):
+        return None
+
+    def text(value, limit=200):
+        return str(value)[:limit] if isinstance(value, (str, int, float)) else ""
+
+    roles = {}
+    for name, item in (raw.get("roles") or {}).items():
+        if name in HEALTH_ROLES and isinstance(item, dict):
+            roles[name] = {
+                "found": int(item.get("found") or 0) if str(item.get("found") or 0).isdigit() else 0,
+                "index": int(item.get("index")) if isinstance(item.get("index"), int) else -1,
+            }
+    registry = raw.get("registry") if isinstance(raw.get("registry"), dict) else {}
+    return {
+        "site": text(raw.get("site"), 24),
+        "ok": bool(raw.get("ok")),
+        "missing": [text(x, 24) for x in (raw.get("missing") or []) if isinstance(x, str)][:8],
+        "empty": [text(x, 24) for x in (raw.get("empty") or []) if isinstance(x, str)][:8],
+        "gate": text(raw.get("gate")) or None,
+        "detail": text(raw.get("detail"), 300),
+        "roles": roles,
+        "registry_version": text(registry.get("version"), 24),
+        "registry_source": text(registry.get("source"), 160),
+        "checked_at": text(raw.get("checked_at"), 40),
+    }
+
+
 class WebBridge:
     def __init__(self, db):
         self.db = db
@@ -176,6 +210,7 @@ class WebBridge:
                 if not key or not origin:
                     continue
                 alive = bool(beat.get("alive"))
+                health = clean_health(beat.get("health")) if alive else None
                 for row in rows:
                     if (row["web_tab_key"] or "") != key or not same_site_origin(row["web_origin"] or "", origin):
                         continue
@@ -184,6 +219,11 @@ class WebBridge:
                             "UPDATE members SET web_conversation='tab', web_seen_at=? WHERE id=?",
                             (now, row["id"]),
                         )
+                        if health is not None:
+                            self.db.conn.execute(
+                                "UPDATE members SET web_health=? WHERE id=?",
+                                (json.dumps(health, ensure_ascii=False), row["id"]),
+                            )
                     else:
                         self.db.conn.execute(
                             "UPDATE members SET web_conversation='down' WHERE id=?",

@@ -1,4 +1,5 @@
 const BACKEND = "http://127.0.0.1:43124";
+importScripts("adapters/schema.js");
 const seen = new Set();
 const inflight = new Map();
 const reported = new Set();
@@ -34,7 +35,12 @@ async function beat(token, bindings) {
     } catch {
       alive = false;
     }
-    tabs.push({ tab_key: tabKey, origin: binding.origin, alive });
+    const entry = { tab_key: tabKey, origin: binding.origin, alive };
+    if (alive) {
+      const health = await tabHealth(binding.tabId);
+      if (health) entry.health = health;
+    }
+    tabs.push(entry);
   }
   if (!tabs.length) return;
   await fetch(`${BACKEND}/api/ext/tabs`, {
@@ -42,6 +48,89 @@ async function beat(token, bindings) {
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify({ tabs }),
   }).catch(() => {});
+}
+
+// 页面检查（不发送）：每 30 秒问一次绑定的标签页，结果随心跳交给本机后端，房间里能马上看到哪个角色坏了。
+const healthAt = new Map();
+const healthCache = new Map();
+
+function tabHealth(tabId) {
+  const last = healthAt.get(tabId) || 0;
+  if (Date.now() - last < 30000) return Promise.resolve(healthCache.get(tabId) || null);
+  healthAt.set(tabId, Date.now());
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), 1500);
+    try {
+      chrome.tabs.sendMessage(tabId, { type: "health" }, (result) => {
+        clearTimeout(timer);
+        if (chrome.runtime.lastError || !result) return resolve(null);
+        healthCache.set(tabId, result);
+        resolve(result);
+      });
+    } catch {
+      clearTimeout(timer);
+      resolve(null);
+    }
+  });
+}
+
+// 远端注册表：只是数据（选择器、正则文本、提示文字、开关）。结构校验通过、版本比内置新才缓存；任何失败都继续用内置。
+const DEFAULT_REGISTRY_URL = "https://raw.githubusercontent.com/tahffo68hk-hash/chatclumer/main/extension/adapters/registry.json";
+const REGISTRY_EVERY_MS = 6 * 60 * 60 * 1000;
+let bundledRegistry = null;
+
+async function loadBundledRegistry() {
+  if (bundledRegistry) return bundledRegistry;
+  const response = await fetch(chrome.runtime.getURL("adapters/registry.json"));
+  bundledRegistry = await response.json();
+  return bundledRegistry;
+}
+
+async function registryUrl() {
+  const { registryUrl: saved } = await chrome.storage.local.get(["registryUrl"]);
+  if (saved === "off") return "";
+  return saved || DEFAULT_REGISTRY_URL;
+}
+
+async function refreshRegistry(force) {
+  const url = await registryUrl();
+  const { registryStatus } = await chrome.storage.local.get(["registryStatus"]);
+  if (!url) {
+    const status = { checked_at: new Date().toISOString(), ok: false, detail: "远端更新已关闭，只用内置注册表" };
+    await chrome.storage.local.set({ registryStatus: status, registryRemote: null });
+    return status;
+  }
+  if (!force && registryStatus && Date.now() - Date.parse(registryStatus.checked_at || 0) < REGISTRY_EVERY_MS) return registryStatus;
+  const status = { checked_at: new Date().toISOString(), url, ok: false, detail: "" };
+  try {
+    if (!/^https:\/\//.test(url)) throw new Error("只接受 https 地址");
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
+    const response = await fetch(url, { cache: "no-cache", credentials: "omit", signal: controller.signal });
+    clearTimeout(timer);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const text = await response.text();
+    if (text.length > 96 * 1024) throw new Error("文件太大");
+    const data = JSON.parse(text);
+    const checked = ChatclumerRegistrySchema.validateRegistry(data, chrome.runtime.getManifest().version);
+    if (!checked.ok) throw new Error(`结构不对：${checked.errors.slice(0, 3).join("；")}`);
+    const bundled = await loadBundledRegistry();
+    if (ChatclumerRegistrySchema.compareVersion(data.version, bundled.version) <= 0) {
+      status.ok = true;
+      status.version = bundled.version;
+      status.detail = `远端 ${data.version} 不比内置 ${bundled.version} 新，用内置`;
+      await chrome.storage.local.set({ registryStatus: status, registryRemote: null });
+      return status;
+    }
+    status.ok = true;
+    status.version = data.version;
+    status.detail = `已缓存远端注册表 ${data.version}（内置 ${bundled.version}）`;
+    await chrome.storage.local.set({ registryStatus: status, registryRemote: { data, url, fetched_at: status.checked_at } });
+  } catch (err) {
+    status.detail = `没有更新：${err && err.message ? err.message : err}。继续用之前的缓存或内置注册表`;
+    await chrome.storage.local.set({ registryStatus: status });
+  }
+  return status;
 }
 
 async function poll() {
@@ -156,12 +245,14 @@ const GUEST_ORIGINS = new Set([
   "https://chat.z.ai",
 ]);
 
+const ADAPTER_FILES = ["adapters/schema.js", "adapters/registry.js", "adapters/runtime.js"];
+
 function scriptFiles(origin) {
-  if (origin === "https://chat.deepseek.com") return ["deepseek.js", "content.js"];
-  if (origin === "https://www.doubao.com") return ["doubao.js", "content.js"];
-  if (origin === "https://yuanbao.tencent.com") return ["yuanbao.js", "content.js"];
-  if (GUEST_ORIGINS.has(origin)) return ["guest.js", "content.js"];
-  return ["content.js"];
+  if (origin === "https://chat.deepseek.com") return [...ADAPTER_FILES, "deepseek.js", "content.js"];
+  if (origin === "https://www.doubao.com") return [...ADAPTER_FILES, "doubao.js", "content.js"];
+  if (origin === "https://yuanbao.tencent.com") return [...ADAPTER_FILES, "yuanbao.js", "content.js"];
+  if (GUEST_ORIGINS.has(origin)) return [...ADAPTER_FILES, "guest.js", "content.js"];
+  return [...ADAPTER_FILES, "content.js"];
 }
 
 async function ensureScript(origin, tabId) {
@@ -209,6 +300,25 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     });
     return;
   }
+  if (message?.type === "registry-get") {
+    chrome.storage.local.get(["registryRemote"]).then(({ registryRemote }) => {
+      sendResponse(registryRemote && registryRemote.data ? { data: registryRemote.data, url: registryRemote.url } : null);
+    });
+    return true;
+  }
+  if (message?.type === "registry-refresh") {
+    refreshRegistry(true).then(sendResponse);
+    return true;
+  }
+  if (message?.type === "registry-set-url") {
+    const url = String(message.url || "").trim();
+    if (url && url !== "off" && !/^https:\/\/[^\s]+$/.test(url)) {
+      sendResponse({ ok: false, detail: "只接受 https 地址，或填 off 关闭远端更新" });
+      return true;
+    }
+    chrome.storage.local.set({ registryUrl: url }).then(() => refreshRegistry(true)).then(sendResponse);
+    return true;
+  }
   if (message?.type === "ensure-script") {
     ensureScript(message.origin, message.tabId).then(sendResponse).catch((err) => {
       sendResponse({ ok: false, detail: err?.message || "内容脚本没有装上" });
@@ -236,4 +346,6 @@ chrome.storage.session.get(["seenIds"]).then(({ seenIds }) => {
   for (const id of seenIds || []) seen.add(id);
   setInterval(poll, 1200);
   poll();
+  refreshRegistry(false).catch(() => {});
+  setInterval(() => refreshRegistry(false).catch(() => {}), 30 * 60 * 1000);
 });

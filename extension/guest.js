@@ -1,137 +1,141 @@
 // 游客站点适配器：Qwen、ChatGPT、文心、智谱清言、Z.ai。
-// 结构取自协调方游客实页 2026-11-15（见 docs/WEB_ACCESS.md）。本文件不是那次桌面验收，不能当成扩展端到端已通过。
-// 五个站的输入框都是普通 textarea，所以共用一套写入、单击、核对和读回逻辑，只是选择器不同。
-const GUEST_DOM_SOURCE = "结构取自 2026-11-15 实页 DOM 导出（dom-dumps）";
+// 0.5.0 起选择器和站点规则不在代码里，而在 adapters/registry.json（数据，带版本，可从远端更新）。
+// 这里把注册表编译成引擎用的规格：选择器列表按顺序回退，规则（has/self/closest/not/all/any）编译成判断函数。
+// 五个站的输入框都是普通 textarea，所以共用一套写入、单击、核对和读回逻辑。
+const GUEST_DOM_SOURCE = "结构取自 2026-11-15 实页 DOM 导出（dom-dumps），见 adapters/registry.json";
 
-// 门槛只在真正打开的弹窗、提示条和验证框里找，不扫回复正文，也不看页头的登录按钮或内嵌的「登录获得更好体验」横幅。
-const GUEST_DIALOGS = "[role='dialog'], [aria-modal='true'], dialog[open], .ant-modal";
-const GUEST_TOASTS = "[role='alert'], [role='status'], .ant-message, .ant-notification, [class*='toast' i], [class*='notice' i]";
-const GUEST_CAPTCHA_BOXES = "[class*='captcha' i], [id*='captcha' i], [id^='nc_'], [class*='nc-container'], [class*='verify' i]";
-const GUEST_CAPTCHA = /drag the slider|slide to verify|向右滑动|拖动滑块|滑动完成验证|verify you are human|人机验证|安全验证/i;
-const GUEST_LOGIN = /log in or sign up|sign up to continue|log in to continue|sign in to continue|登录后(继续|即可|使用)|请先登录|登录以继续|扫码登录|手机号登录|验证码登录|使用.{0,8}账号登录/i;
-const GUEST_NOT_LOGIN = /personali[sz]ed|clear current chat/i;
+function guestRegistry() {
+  return globalThis.ChatclumerAdapters || null;
+}
 
-const GUEST_SITES = {
-  qwen: {
-    label: "Qwen",
-    composer: "textarea.message-input-textarea, textarea[placeholder='Ask Qwen']",
-    send: "button.send-button[aria-label='Send']",
-    stop: "button.stop-button[aria-label='Stop'], button[data-aes-exp='expInputStop']",
-    users: ".qwen-chat-message-user",
-    userText: "p.user-message-content",
-    assistants: ".qwen-chat-message-assistant",
-    body: ".response-message-content.phase-answer, .response-message-content .qwen-markdown",
-    exclude: "[class*='thinking']",
-    streamingIn: (node) => (node.querySelector(".response-loading") ? true : null),
-    doneNear: ".response-message-footer button[aria-label='Copy'], button[class*='action-control-container-copy']",
-    convUrl: /\/c\/(?!new-chat)[\w-]{8,}/,
-    gates: [
-      { test: /do not have permission to access this resource|没有权限访问/i, where: "toast", detail: "千问游客发送被拒绝，可能需要登录（页面提示没有权限）。扩展没有重发" },
-      { test: /confirm your age|确认.{0,6}年龄|年龄确认/i, where: "dialog", detail: "需要先在页面上完成确认（Qwen 年龄确认），扩展不会替你点" },
-    ],
-  },
-  chatgpt: {
-    label: "ChatGPT",
-    composer: "textarea#mobile-composer-prompt, textarea[name='prompt'][data-mobile-composer-prompt]",
-    send: "button[data-composer-submit]",
-    // 同一个按钮在生成时换成停止（data-stop-label="Stop generating"）。
-    stopFind: (root) => {
-      const el = root.querySelector("button[data-composer-submit]");
-      if (el && /stop/i.test(el.getAttribute("aria-label") || "")) return el;
-      return root.querySelector("button[data-testid='stop-button'], button[aria-label='Stop generating']");
-    },
-    users: "li[data-message-role='user']",
-    userText: "[data-user-message-copy]",
-    assistants: "li[data-message-role='assistant']",
-    body: "[data-assistant-markdown-root]",
-    streamingIn: (node) => {
-      if (node.querySelector("[aria-busy='true']")) return true;
-      if (node.hasAttribute("data-message-complete")) return false;
+function guestRx(value) {
+  return value ? new RegExp(value.source, value.flags || "") : null;
+}
+
+function guestCond(cond) {
+  if (!cond) return () => false;
+  if (cond.has) return (node) => !!node.querySelector(cond.has);
+  if (cond.self) return (node) => !!(node.matches && node.matches(cond.self));
+  if (cond.not) {
+    const inner = guestCond(cond.not);
+    return (node) => !inner(node);
+  }
+  if (cond.all) {
+    const list = cond.all.map(guestCond);
+    return (node) => list.every((fn) => fn(node));
+  }
+  if (cond.any) {
+    const list = cond.any.map(guestCond);
+    return (node) => list.some((fn) => fn(node));
+  }
+  if (cond.closest) {
+    return (node) => {
+      const host = node.closest(cond.closest);
+      return !!host && host.getAttribute(cond.attr) === cond.equals;
+    };
+  }
+  return () => false;
+}
+
+function guestCompileSite(id, raw) {
+  const roles = raw.roles || {};
+  const join = (key) => (roles[key] ? roles[key].join(", ") : undefined);
+  const flags = raw.flags || {};
+  const spec = {
+    id,
+    label: raw.label,
+    composerList: roles.composer || [],
+    sendList: roles.send || [],
+    composer: join("composer"),
+    send: join("send"),
+    stop: join("stop"),
+    users: join("users"),
+    userText: join("user_text"),
+    assistants: join("assistants"),
+    host: join("host"),
+    body: join("body"),
+    exclude: join("exclude"),
+    doneNear: join("done_near"),
+    writer: flags.writer || "native",
+    guardOther: !!flags.guard_other,
+    clickInner: flags.click_inner || undefined,
+    clickCenter: !!flags.click_center,
+    placeholderText: guestRx(raw.placeholder_text),
+    convUrl: guestRx(raw.conv_url),
+    gates: (raw.gates || []).map((g) => ({ test: guestRx(g.pattern), where: g.where, detail: g.detail })),
+  };
+  if (raw.disabled) spec.disabled = guestCond(raw.disabled);
+  if (raw.stop_find) {
+    const finders = raw.stop_find.map((f) => ({ sel: f.sel, closest: f.closest, attr: f.attr, test: guestRx(f.pattern) }));
+    spec.stopFind = (root) => {
+      for (const f of finders) {
+        let el = root.querySelector(f.sel);
+        if (!el) continue;
+        if (f.attr && !f.test.test(el.getAttribute(f.attr) || "")) continue;
+        if (f.closest) el = el.closest(f.closest);
+        if (el) return el;
+      }
       return null;
-    },
-    doneIn: (node) => node.hasAttribute("data-message-complete") && !node.querySelector("[aria-busy='true']"),
-    convUrl: /\/(c|uc)\/[\w-]{8,}/,
-    gates: [
-      { test: /sign in to continue|log in to continue/i, where: "page", detail: "ChatGPT 需要登录后才能继续（游客额度可能用完）。扩展没有写入，也不会重试" },
-    ],
-  },
-  wenxin: {
-    label: "文心",
-    composer: "textarea#chat-textarea",
-    send: "span.ci-submit-button",
-    // 文心的发送图标在空框时也是 active，没有可靠的「站点已认到文字」标记；点击落在图标上（人点到的就是它）。
-    disabled: (el) => !el.querySelector("img#ci-submit-button-ai"),
-    writer: "exec",
-    guardOther: true,
-    clickInner: "img#ci-submit-button-ai",
-    stopFind: (root) => {
-      const icon = root.querySelector("span.ci-submit-button img.ci-submit-pause");
-      return icon ? icon.closest("span.ci-submit-button") : null;
-    },
-    users: ".cs-question-bubble",
-    userText: ".cs-question-pure-text",
-    assistants: ".conversation-flow-answer-container",
-    body: ".ai-entry-block.ai-markdown .cosd-markdown-content, .ai-entry-block.ai-markdown .marklang",
-    placeholderText: /^正在思考/,
-    streamingIn: (node) => {
-      const pair = node.closest(".chat-qa-container[data-chat-status]");
-      const status = pair ? pair.getAttribute("data-chat-status") : "";
-      if (status === "GENERATING") return true;
-      if (status === "COMPLETE") return false;
+    };
+  }
+  if (raw.streaming) {
+    const rules = raw.streaming.map((r) => ({ when: guestCond(r.when), value: r.value }));
+    spec.streamingIn = (node) => {
+      for (const rule of rules) if (rule.when(node)) return rule.value;
       return null;
-    },
-    doneIn: (node) => {
-      const pair = node.closest(".chat-qa-container[data-chat-status]");
-      return !!pair && pair.getAttribute("data-chat-status") === "COMPLETE";
-    },
-    convUrl: /\/search\/\d+/,
-  },
-  zhipu: {
-    label: "智谱清言",
-    composer: "#search-input-box textarea, .input-box-inner textarea",
-    send: "#search-input-box div.enter.is-main-chat, div.enter.is-main-chat",
-    // 空框时 .enter-icon-container 带 empty；站点认到文字后才去掉（实页 DOM 0-empty 与 1-typed 的差别）。
-    disabled: (el) => el.classList.contains("searching") || !!el.querySelector(".enter-icon-container.empty"),
-    writer: "exec",
-    guardOther: true,
-    registered: (root) => {
-      const el = root.querySelector("#search-input-box div.enter.is-main-chat, div.enter.is-main-chat");
-      return !!el && !el.classList.contains("searching") && !el.querySelector(".enter-icon-container.empty");
-    },
-    clickCenter: true,
-    stopFind: (root) => root.querySelector("div.enter.is-main-chat.searching"),
-    users: ".conversation.question",
-    userText: ".question-txt",
-    assistants: ".answer[id^='row-answer-']",
-    body: ".answer-content-wrap .markdown-body",
-    exclude: ".text-advance-thinking-content, .advance-thinking",
-    streamingIn: (node) => {
-      if (node.querySelector(".answer-loading")) return true;
-      if (node.querySelector(".interact-container .copy, .interact-container .regenerate")) return false;
-      return null;
-    },
-    doneIn: (node) => !node.querySelector(".answer-loading") && !!node.querySelector(".interact-container .copy, .interact-container .regenerate"),
-    convUrl: /[?&]cid=/,
-  },
-  zai: {
-    label: "Z.ai",
-    composer: "textarea#chat-input",
-    send: "button#send-message-button",
-    stop: "button[aria-label='Stop'][data-slot='button']",
-    users: ".user-message",
-    userText: "[data-user-bubble]",
-    assistants: ".chat-assistant",
-    host: "div[id^='message-']",
-    body: ".chat-markdown",
-    exclude: ".thinking-chain-container",
-    streamingIn: (node) => (node.querySelector("._common-loading") ? true : null),
-    doneNear: "button[aria-label='Copy'], button[aria-label='Regenerate']",
-    convUrl: /\/c\/[\w-]{8,}/,
-  },
-};
+    };
+  }
+  if (raw.done) spec.doneIn = guestCond(raw.done);
+  if (flags.wait_send_enabled) {
+    spec.registered = (root) => {
+      const el = guestSend(id, root);
+      return !!el && !guestDisabled(id, el);
+    };
+  }
+  // 每个选择器都必须能解析，否则整站编译失败、改用内置注册表里的这一站。
+  const all = [...Object.values(roles).flat(), spec.clickInner].filter(Boolean);
+  for (const sel of all) document.createDocumentFragment().querySelector(sel);
+  return spec;
+}
+
+const guestCompiled = new WeakMap();
 
 function guestSpec(site) {
-  return GUEST_SITES[site] || null;
+  const reg = guestRegistry();
+  if (!reg) return null;
+  const tryCompile = (raw) => {
+    if (!raw || raw.engine !== "guest") return null;
+    if (guestCompiled.has(raw)) return guestCompiled.get(raw);
+    let spec = null;
+    try {
+      spec = guestCompileSite(site, raw);
+    } catch {
+      spec = null;
+    }
+    guestCompiled.set(raw, spec);
+    return spec;
+  };
+  const bundledRaw = reg.bundled().sites ? reg.bundled().sites[site] : null;
+  return tryCompile(reg.site(site)) || tryCompile(bundledRaw);
+}
+
+const guestCommonCache = new WeakMap();
+
+// 门槛只在真正打开的弹窗、提示条和验证框里找，不扫回复正文，也不看页头的登录按钮或内嵌的「登录获得更好体验」横幅。
+function guestCommon() {
+  const reg = guestRegistry();
+  const raw = reg ? reg.common() : {};
+  if (guestCommonCache.has(raw)) return guestCommonCache.get(raw);
+  const out = {
+    dialogs: (raw.dialogs || []).join(", ") || "[role='dialog']",
+    toasts: (raw.toasts || []).join(", ") || "[role='alert']",
+    captchaBoxes: (raw.captcha_boxes || []).join(", ") || "[class*='captcha' i]",
+    captcha: guestRx(raw.captcha) || /人机验证/,
+    login: guestRx(raw.login) || /请先登录/,
+    notLogin: guestRx(raw.not_login) || /$^/,
+  };
+  guestCommonCache.set(raw, out);
+  return out;
 }
 
 function guestVisible(el) {
@@ -158,8 +162,12 @@ function guestPoints(value) {
 function guestComposer(site, root) {
   const spec = guestSpec(site);
   if (!spec) return null;
-  const nodes = [...root.querySelectorAll(spec.composer)].filter((el) => el.tagName === "TEXTAREA");
-  return nodes.find((el) => guestVisible(el)) || nodes[0] || null;
+  // 按注册表顺序回退：第一个能找到 textarea 的选择器为准。
+  for (const sel of spec.composerList) {
+    const nodes = [...root.querySelectorAll(sel)].filter((el) => el.tagName === "TEXTAREA");
+    if (nodes.length) return nodes.find((el) => guestVisible(el)) || nodes[0];
+  }
+  return null;
 }
 
 function guestComposerText(node) {
@@ -183,9 +191,11 @@ function guestClearComposer(composer) {
 function guestSend(site, root) {
   const spec = guestSpec(site);
   if (!spec) return null;
-  if (spec.sendFind) return spec.sendFind(root);
-  const nodes = [...root.querySelectorAll(spec.send)];
-  return nodes.find((el) => guestVisible(el)) || nodes[0] || null;
+  for (const sel of spec.sendList) {
+    const nodes = [...root.querySelectorAll(sel)];
+    if (nodes.length) return nodes.find((el) => guestVisible(el)) || nodes[0];
+  }
+  return null;
 }
 
 function guestStop(site, root) {
@@ -376,20 +386,21 @@ function guestPageTexts(site, root) {
 function guestGate(site, root) {
   const spec = guestSpec(site);
   if (!spec) return null;
+  const common = guestCommon();
   const read = (selector) => [...root.querySelectorAll(selector)]
     .filter((el) => guestVisible(el) && !(el.tagName === "DIALOG" && !el.open))
     .map((el) => (el.innerText || el.textContent || "").slice(0, 800));
-  const dialogs = read(GUEST_DIALOGS);
-  const toasts = read(GUEST_TOASTS);
+  const dialogs = read(common.dialogs);
+  const toasts = read(common.toasts);
   const heads = read("h1, h2, h3");
   const page = (spec.gates || []).some((gate) => gate.where === "page") ? guestPageTexts(site, root) : [];
   for (const gate of spec.gates || []) {
     const pool = gate.where === "toast" ? toasts.concat(dialogs) : gate.where === "page" ? dialogs.concat(heads, page) : dialogs.concat(heads);
     if (pool.some((text) => gate.test.test(text))) return gate.detail;
   }
-  const captcha = dialogs.concat(read(GUEST_CAPTCHA_BOXES));
-  if (captcha.some((text) => GUEST_CAPTCHA.test(text))) return `${spec.label} 出现人机验证，需要你在页面上完成后再试，扩展不会代做`;
-  if (dialogs.some((text) => GUEST_LOGIN.test(text) && !GUEST_NOT_LOGIN.test(text))) return `${spec.label} 需要登录，请在该标签页登录一次后重试`;
+  const captcha = dialogs.concat(read(common.captchaBoxes));
+  if (captcha.some((text) => common.captcha.test(text))) return `${spec.label} 出现人机验证，需要你在页面上完成后再试，扩展不会代做`;
+  if (dialogs.some((text) => common.login.test(text) && !common.notLogin.test(text))) return `${spec.label} 需要登录，请在该标签页登录一次后重试`;
   const loc = (root && root.defaultView && root.defaultView.location) || (typeof location !== "undefined" ? location : null);
   if (loc && /^\/(auth|login|sign_?in)(\/|$)/i.test(loc.pathname || "")) return `${spec.label} 需要登录，请在该标签页登录一次后重试`;
   return null;

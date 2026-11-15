@@ -135,6 +135,15 @@ function freshTabKey(site: string) {
   return `${site}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+const ROLE_LABELS: Record<string, string> = { composer: "输入框", send: "发送键", users: "用户消息", assistants: "助手消息", messages: "消息", body: "回复正文", user_text: "用户正文" };
+
+function healthLine(health: NonNullable<Member["web_health"]>) {
+  const version = health.registry_version ? ` · 注册表 ${health.registry_version}` : "";
+  if (health.gate) return `页面检查：${health.gate}${version}`;
+  if (!health.ok) return `页面检查：找不到${health.missing.map((r) => ROLE_LABELS[r] || r).join("、")}，适配器可能已失效${version}`;
+  return `页面检查：输入框、发送键正常${version}`;
+}
+
 function bindStatus(member: Member) {
   if (member.provider !== "web") return "";
   return member.web_link || "未绑定";
@@ -640,6 +649,15 @@ export function ChatApp() {
                     {member.provider === "web" && (
                       <div className="mt-2 space-y-1 text-[11px] text-[#e7d7c4]" data-testid="web-card">
                         <p data-testid="bind-status">{bindStatus(member)}</p>
+                        {member.web_health && (
+                          <p
+                            data-testid="web-health"
+                            title={member.web_health.detail}
+                            className={member.web_health.ok ? "text-[#bfe3c0]" : "text-[#ffb4a2]"}
+                          >
+                            {healthLine(member.web_health)}
+                          </p>
+                        )}
                         <label className="block">成员 ID
                           <input readOnly data-testid="member-id" className="mt-1 w-full rounded bg-black/20 px-2 py-1 font-mono" value={member.id} />
                         </label>

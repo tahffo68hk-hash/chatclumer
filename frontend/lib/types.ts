@@ -68,6 +68,7 @@ export type Member = {
   web_auto?: boolean;
   web_conversation?: string | null;
   web_link?: string;
+  web_health?: WebHealth | null;
 };
 
 export type ChatMessage = {
@@ -130,4 +131,18 @@ export type CatalogItem = {
   paid: boolean;
   key_env: string;
   note: string;
+};
+
+// 扩展的页面检查（不发送）结果，随心跳上报。
+export type WebHealth = {
+  site: string;
+  ok: boolean;
+  missing: string[];
+  empty: string[];
+  gate: string | null;
+  detail: string;
+  roles: Record<string, { found: number; index: number }>;
+  registry_version: string;
+  registry_source: string;
+  checked_at: string;
 };

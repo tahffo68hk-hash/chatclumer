@@ -10,6 +10,16 @@
 <label>标签页绑定键<br><input id="tabkey" style="width:100%"></label>
 <button id="bind" type="button">绑定当前标签页</button>
 <p id="status"></p>
+<hr>
+<p style="margin:6px 0"><b>页面检查</b>（只找元素，不写入、不点击）</p>
+<button id="health" type="button">检查当前页</button>
+<button id="dump" type="button">导出诊断快照</button>
+<pre id="health-out" style="white-space:pre-wrap;font-size:12px;max-height:180px;overflow:auto"></pre>
+<hr>
+<p style="margin:6px 0"><b>适配器注册表</b></p>
+<p id="registry" style="font-size:12px"></p>
+<label>远端地址（https，填 off 关闭）<br><input id="registry-url" style="width:100%"></label>
+<button id="registry-save" type="button">保存并检查更新</button>
 <script src="popup.js"></script>
 </body>
 </html>
