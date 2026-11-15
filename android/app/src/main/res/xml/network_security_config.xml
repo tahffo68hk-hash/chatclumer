@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  电脑上的 ChatCluster 在局域网里一般是明文 HTTP，例如 http://192.168.1.5:43123。
+  Android 9（API 28）起默认禁止明文流量。network-security-config 只能按域名放行，
+  不能按 192.168.0.0/16 这类未知网段放行，所以这里允许明文 HTTP。
+  应用仍会先请求 /m/ping，确认对方的 app 字段是 chatclumer，并且 WebView 只停留在用户确认过的源。
+  Tailscale 地址同样可能是 http。不要把没有配对的服务暴露到公网。
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

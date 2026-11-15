@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="window_bg">#1B1916</color>
+    <color name="card_bg">#2A2622</color>
+    <color name="ink">#F6F1E8</color>
+    <color name="muted">#CBBBA6</color>
+    <color name="seed">#E7C8A0</color>
+    <color name="on_seed">#1C1915</color>
+</resources>
