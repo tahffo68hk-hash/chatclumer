@@ -247,24 +247,76 @@ function deepseekText(node) {
   return deepseekShown(clone.innerText || clone.textContent || "");
 }
 
+const DEEPSEEK_ACTION = "div[role='button'].ds-button--iconLabelTertiary";
+
+function deepseekHoldsMessage(el) {
+  return !!(el && (el.matches(".ds-message") || el.querySelector(".ds-message")));
+}
+
+// 0.3.1 只在 .ds-message 里面找操作栏。实页的复制/重新生成栏在消息外面（同一个虚拟列表项或紧随其后），
+// 所以完成永远判不出来，只能等满 90 秒再按「可能未完整」读回。这里里外都找，遇到下一条消息就停。
+function deepseekActionBar(node) {
+  if (!node) return false;
+  if (node.querySelector(DEEPSEEK_ACTION)) return true;
+  const item = node.closest("[data-virtual-list-item-key]");
+  const scopes = item && item !== node ? [node, item] : [node];
+  for (const scope of scopes) {
+    let sib = scope.nextElementSibling;
+    while (sib && !deepseekHoldsMessage(sib)) {
+      if (sib.matches(DEEPSEEK_ACTION) || sib.querySelector(DEEPSEEK_ACTION)) return true;
+      sib = sib.nextElementSibling;
+    }
+  }
+  if (item && item !== node && item.querySelectorAll(".ds-message").length === 1 && item.querySelector(DEEPSEEK_ACTION)) return true;
+  return false;
+}
+
 function deepseekDone(node) {
   if (!node || !deepseekText(node)) return false;
-  const buttons = [...node.querySelectorAll(".ds-flex div[role='button'].ds-button--iconLabelTertiary")];
-  return buttons.length > 0;
+  return deepseekActionBar(node);
+}
+
+// true：正在生成（明确的停止标记，或输入框为空而圆形按钮却可点，那就是停止键）。
+// false：发送键回到空框时的禁用态。null：判断不了（找不到按钮，或用户自己在框里打字）。
+function deepseekStreaming(root) {
+  const send = deepseekSend(root);
+  if (!send) return null;
+  if (deepseekInStopState(send)) return true;
+  if (send.classList.contains("ds-button--disabled") || send.getAttribute("aria-disabled") === "true") return false;
+  const composer = deepseekComposer(root);
+  if (!composer || deepseekComposerText(composer) === "") return true;
+  return null;
+}
+
+// 停止时要点的按钮。名字或图标写着停止就点；只靠「空框却可点」推断时，还要求最后一条消息是 AI 的，
+// 避免清空输入框后 React 还没重绘时误点发送。
+function deepseekStopTarget(root) {
+  const send = deepseekSend(root);
+  if (!send) return null;
+  if (deepseekInStopState(send)) return send;
+  if (deepseekStreaming(root) !== true) return null;
+  const messages = [...root.querySelectorAll(".ds-message")];
+  const tail = messages[messages.length - 1];
+  if (!tail || deepseekUsers(root).includes(tail)) return null;
+  return send;
 }
 
 function deepseekNewReply(root, prompt) {
   const messages = [...root.querySelectorAll(".ds-message")];
-  let after = false;
-  let found = null;
-  for (const node of messages) {
-    if (!after) {
-      if (deepseekUsers(root).includes(node) && deepseekUserMatches(node, prompt)) after = true;
-      continue;
+  const users = new Set(deepseekUsers(root));
+  let mine = -1;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (users.has(messages[i]) && deepseekUserMatches(messages[i], prompt)) {
+      mine = i;
+      break;
     }
-    if (node.querySelector(".ds-assistant-message-main-content")) found = node;
   }
-  return found;
+  if (mine < 0) return null;
+  for (let i = mine + 1; i < messages.length; i += 1) {
+    if (users.has(messages[i])) break;
+    if (messages[i].querySelector(".ds-assistant-message-main-content")) return messages[i];
+  }
+  return null;
 }
 
 function deepseekPartial(node) {
@@ -277,7 +329,8 @@ function deepseekTimeoutNote(root, beforeCount) {
   const items = deepseekAssistants(root);
   const send = deepseekSend(root);
   const klass = send ? [...send.classList].join(" ").slice(0, 80) : "";
-  return `超时。AI ${beforeCount}→${items.length}，发送 class ${klass}`;
+  const streaming = deepseekStreaming(root);
+  return `超时。AI ${beforeCount}→${items.length}，生成中 ${streaming === null ? "未知" : streaming ? "是" : "否"}，发送 class ${klass}`;
 }
 
 function deepseekLoginDetail() {

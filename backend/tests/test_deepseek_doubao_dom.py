@@ -401,3 +401,117 @@ def test_deepseek_first_send_survives_spa_navigation():
     assert result["text"] == "我是 DeepSeek，你好，世界"
     assert result["comma"] is True
     assert result["task"] in {None, "null"}
+
+
+DEEPSEEK_STREAM_PAGE = """
+<meta charset="utf-8">
+<div class="ds-virtual-list-visible-items">
+  <div data-virtual-list-item-key="1">
+    <div class="ds-message"><div class="ds-collapsible-text"><span>请介绍一下你自己。</span></div></div>
+  </div>
+  <div data-virtual-list-item-key="2">
+    <div class="ds-message"><div class="ds-markdown ds-assistant-message-main-content"><p>旧回答</p></div></div>
+    <div class="ds-flex"><div role="button" class="ds-button ds-button--iconLabelTertiary">复制</div></div>
+  </div>
+  <div data-virtual-list-item-key="3">
+    <div class="ds-message"><div class="ds-collapsible-text"><span>请介绍一下你自己。</span></div></div>
+  </div>
+</div>
+<div class="bf38813a">
+  <textarea placeholder="Message DeepSeek" name="search" rows="2"></textarea>
+  <div role="button" class="ds-button ds-button--circle ds-button--m" tabindex="0"><svg class="x1"></svg></div>
+</div>
+"""
+
+
+def _deepseek_stream_page(playwright, body):
+    browser = playwright.chromium.launch(channel="chrome", headless=True)
+    page = browser.new_page()
+    page.route("https://chat.deepseek.com/**", lambda route: route.fulfill(status=200, content_type="text/html; charset=utf-8", body=body))
+    page.goto("https://chat.deepseek.com/a/chat/s/stream-1")
+    page.add_script_tag(path=str(ROOT / "extension" / "deepseek.js"))
+    page.evaluate(
+        """() => {
+          window.chrome = { runtime: { id: "room", sendMessage() {}, onMessage: { addListener() {}, removeListener() {} } } };
+        }"""
+    )
+    page.add_script_tag(path=str(ROOT / "extension" / "content.js"))
+    return browser, page
+
+
+def test_deepseek_completion_fires_when_action_bar_sits_outside_the_message():
+    with sync_playwright() as playwright:
+        browser, page = _deepseek_stream_page(playwright, DEEPSEEK_STREAM_PAGE)
+        result = page.evaluate(
+            """async () => {
+              const list = document.querySelector(".ds-virtual-list-visible-items");
+              const send = document.querySelector(".ds-button--circle");
+              const item = document.createElement("div");
+              item.setAttribute("data-virtual-list-item-key", "4");
+              item.innerHTML = '<div class="ds-message"><div class="ds-markdown ds-assistant-message-main-content"><p></p></div></div>';
+              list.appendChild(item);
+              const para = item.querySelector("p");
+              const states = [];
+              const words = ["我是", "DeepSeek，", "很高兴", "认识你。"];
+              let step = 0;
+              const timer = setInterval(() => {
+                if (step < words.length) {
+                  para.textContent += words[step];
+                  step += 1;
+                  states.push(deepseekStreaming(document));
+                  return;
+                }
+                clearInterval(timer);
+                send.classList.add("ds-button--disabled");
+                send.removeAttribute("tabindex");
+                const bar = document.createElement("div");
+                bar.className = "ds-flex";
+                bar.innerHTML = '<div role="button" class="ds-button ds-button--iconLabelTertiary">复制</div>';
+                item.appendChild(bar);
+                states.push(deepseekStreaming(document));
+              }, 300);
+              const started = Date.now();
+              const read = await resumeJob({ request_id: "stream-job", prompt: "请介绍一下你自己。", site: "deepseek" });
+              return {
+                status: read.status,
+                text: read.text,
+                elapsed: Date.now() - started,
+                states,
+                done: deepseekDone(deepseekNewReply(document, "请介绍一下你自己。")),
+                oldDone: deepseekDone(list.querySelector("[data-virtual-list-item-key='2'] .ds-message")),
+              };
+            }"""
+        )
+        browser.close()
+    assert result["status"] == "complete"
+    assert result["text"] == "我是DeepSeek，很高兴认识你。"
+    assert "可能未完整" not in result["text"]
+    assert result["states"][:4] == [True, True, True, True]
+    assert result["states"][-1] is False
+    assert result["done"] is True
+    assert result["oldDone"] is True
+    assert result["elapsed"] < 8000
+
+
+def test_deepseek_falls_back_when_streaming_state_is_unknown():
+    body = DEEPSEEK_STREAM_PAGE.replace(
+        '<div role="button" class="ds-button ds-button--circle ds-button--m" tabindex="0"><svg class="x1"></svg></div>', ""
+    )
+    with sync_playwright() as playwright:
+        browser, page = _deepseek_stream_page(playwright, body)
+        result = page.evaluate(
+            """async () => {
+              const item = document.createElement("div");
+              item.setAttribute("data-virtual-list-item-key", "4");
+              item.innerHTML = '<div class="ds-message"><div class="ds-markdown ds-assistant-message-main-content"><p>没有按钮也能收尾。</p></div></div>';
+              document.querySelector(".ds-virtual-list-visible-items").appendChild(item);
+              const started = Date.now();
+              const read = await resumeJob({ request_id: "fallback-job", prompt: "请介绍一下你自己。", site: "deepseek" });
+              return { status: read.status, text: read.text, elapsed: Date.now() - started, streaming: deepseekStreaming(document) };
+            }"""
+        )
+        browser.close()
+    assert result["streaming"] is None
+    assert result["status"] == "complete"
+    assert result["text"] == "没有按钮也能收尾。"
+    assert 5500 <= result["elapsed"] < 12000

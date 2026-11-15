@@ -92,13 +92,16 @@ const adapters = {
     onlyNew: true,
     readCap: 90000,
     stableMs: 2500,
+    fallbackStableMs: 6000,
+    staleMs: 15000,
+    streaming: () => (typeof deepseekStreaming === "function" ? deepseekStreaming(document) : null),
     replyNode: (prompt) => (typeof deepseekNewReply === "function" ? deepseekNewReply(document, prompt) : null),
     idle: () => typeof deepseekSendIdle !== "function" || deepseekSendIdle(document),
     partial: (node) => (typeof deepseekPartial === "function" ? deepseekPartial(node) : ""),
     timeoutDetail: (beforeCount) => (typeof deepseekTimeoutNote === "function" ? deepseekTimeoutNote(document, beforeCount) : "超时"),
     login: () => typeof deepseekLogin === "function" && deepseekLogin(document),
     loginDetail: () => (typeof deepseekLoginDetail === "function" ? deepseekLoginDetail() : "页面停在登录或验证，没有点击发送"),
-    stop: () => (typeof deepseekInStopState === "function" && deepseekInStopState(deepseekSend(document)) ? deepseekSend(document) : null),
+    stop: () => (typeof deepseekStopTarget === "function" ? deepseekStopTarget(document) : null),
   },
   doubao: {
     composer: () => (typeof doubaoComposer === "function" ? doubaoComposer(document) : null),
@@ -152,11 +155,59 @@ function currentReply(adapter, before, prompt) {
   return fresh[fresh.length - 1] || null;
 }
 
+// 等下一次检查：最多 ms 毫秒，页面有 DOM 变化时提前醒来（至少隔 150 毫秒）。
+// 后台标签页的定时器会被浏览器拉长，MutationObserver 不受影响，所以流式输出停下后能及时再看一眼。
+function waitTick(ms) {
+  return new Promise((resolve) => {
+    const started = Date.now();
+    let finished = false;
+    let observer = null;
+    let timer = null;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      if (observer) observer.disconnect();
+      resolve();
+    };
+    timer = setTimeout(finish, ms);
+    try {
+      if (typeof MutationObserver === "function" && document.body) {
+        observer = new MutationObserver(() => {
+          const left = 150 - (Date.now() - started);
+          if (left <= 0) finish();
+          else {
+            clearTimeout(timer);
+            timer = setTimeout(finish, left);
+          }
+        });
+        observer.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true });
+      }
+    } catch {
+      /* 观察失败时只靠定时器 */
+    }
+  });
+}
+
+// 回复是否可以收尾。稳定时长都用 Date.now() 差值算，不数轮询次数。
+// 适配器提供 streaming() 时：有完成标记或确认不在生成，文字稳定 stableMs；判断不了是否在生成，稳定 fallbackStableMs；
+// 看起来仍在生成，稳定 staleMs 才收（防止停止键识别错把每轮都拖到 90 秒）。没有 streaming() 的站点照旧要求 done 且 idle。
+function replySettled(adapter, node, text, stableFor, idle) {
+  if (!node || !text) return false;
+  const stableMs = adapter.stableMs || 800;
+  if (typeof adapter.streaming !== "function") return adapter.done(node) && idle && stableFor >= stableMs;
+  const streaming = adapter.streaming(node);
+  const marked = adapter.done(node);
+  if (streaming === true) return stableFor >= (adapter.staleMs || 15000);
+  if (marked || streaming === false) return stableFor >= stableMs;
+  return stableFor >= (adapter.fallbackStableMs || 6000);
+}
+
 async function waitNew(adapter, before, signal, prompt) {
   let last = "";
-  let stableSince = 0;
+  let changedAt = Date.now();
+  let lastBodyCheck = 0;
   const deadline = Date.now() + (adapter.readCap || (adapter.onlyNew ? 90000 : 32000));
-  const stableMs = adapter.stableMs || 800;
   while (Date.now() < deadline) {
     if (signal.cancelled) return cancelResult();
     if (adapter.login && adapter.login()) {
@@ -168,27 +219,21 @@ async function waitNew(adapter, before, signal, prompt) {
     }
     const node = currentReply(adapter, before, prompt);
     const idle = typeof adapter.idle !== "function" || adapter.idle();
-    if (node && adapter.done(node) && idle) {
-      const text = adapter.text(node);
-      if (text && text === last) {
-        if (!stableSince) stableSince = Date.now();
-        if (Date.now() - stableSince >= stableMs) return { status: "complete", text };
-      } else {
-        last = text;
-        stableSince = text ? Date.now() : 0;
-      }
-    } else {
-      const text = node ? adapter.text(node) : "";
-      if (text !== last) {
-        last = text;
-        stableSince = 0;
+    const text = node ? adapter.text(node) : "";
+    const now = Date.now();
+    if (text !== last) {
+      last = text;
+      changedAt = now;
+    }
+    if (replySettled(adapter, node, text, now - changedAt, idle)) return { status: "complete", text };
+    if (!node && now - lastBodyCheck >= 1500) {
+      lastBodyCheck = now;
+      const body = document.body ? document.body.innerText : "";
+      if (/rate limit|too many requests|you've reached your|配额已用完|次数已用完|usage limit/i.test(body)) {
+        return { status: "rate_limit", detail: "页面出现限流提示，已停止" };
       }
     }
-    const body = document.body ? document.body.innerText : "";
-    if (/rate limit|too many requests|you've reached your|配额已用完|次数已用完|usage limit/i.test(body) && !node) {
-      return { status: "rate_limit", detail: "页面出现限流提示，已停止" };
-    }
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    await waitTick(400);
   }
   const late = currentReply(adapter, before, prompt);
   const partial = late && typeof adapter.partial === "function" ? adapter.partial(late) : "";
