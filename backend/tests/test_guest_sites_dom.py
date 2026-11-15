@@ -259,3 +259,61 @@ def test_guest_send_that_never_lands_reports_filled_not_sent_and_clears():
     assert PROMPT not in result["detail"]
     assert result["clicks"] == 1
     assert result["empty"] is True
+
+
+ZAI_VERIFY = """async ([prompt, where, preexisting]) => {
+  const box = document.querySelector("textarea");
+  const btn = document.querySelector("#send-message-button");
+  const list = document.querySelector("#messages-container");
+  if (preexisting) {
+    // 点击前就在页面上的旧问答里有同样的字：不能因此误判。
+    list.insertAdjacentHTML("beforeend", '<div id="message-a0"><div class="chat-assistant"><div class="chat-markdown"><p>旧回答：Verification required, please try again</p></div><button aria-label="Copy">c</button></div></div>');
+  }
+  box.addEventListener("input", () => { btn.disabled = !box.value; });
+  let clicks = 0;
+  btn.addEventListener("pointerdown", () => {
+    clicks += 1;
+    const typed = box.value;
+    list.insertAdjacentHTML("beforeend", '<div class="user-message" id="message-u1"><div class="chat-user"><div data-user-bubble="true"></div></div></div>');
+    list.querySelector("#message-u1 [data-user-bubble]").textContent = typed;
+    box.value = ""; btn.disabled = true;
+    setTimeout(() => {
+      if (where === "assistant") {
+        list.insertAdjacentHTML("beforeend", '<div id="message-a1"><div class="chat-assistant"><div class="text-red">Verification required, please try again</div></div></div>');
+      } else if (where === "toast") {
+        document.body.insertAdjacentHTML("beforeend", '<div role="alert" class="toast">Verification required, please try again</div>');
+      } else if (where === "page") {
+        list.insertAdjacentHTML("afterend", '<div class="err-line">Verification required, please try again</div>');
+      } else {
+        list.insertAdjacentHTML("beforeend", '<div id="message-a1"><div class="chat-assistant"><div id="response-content-container"><div class="chat-markdown"><p>你好！</p></div></div></div></div>');
+        setTimeout(() => list.querySelector("#message-a1").insertAdjacentHTML("beforeend", '<div><button aria-label="Copy" data-slot="button" data-variant="tertiary">c</button><button aria-label="Regenerate">r</button></div>'), 300);
+      }
+    }, 1500);
+  });
+  const started = Date.now();
+  const result = await runJob({ request_id: "zai-verify-" + where + (preexisting ? "-old" : ""), prompt, site: "zai", action: "run" });
+  return { status: result.status, detail: result.detail || "", text: result.text || "", clicks, elapsed: Date.now() - started, empty: box.value === "" };
+}"""
+
+
+@pytest.mark.parametrize("where", ["assistant", "toast", "page"])
+def test_zai_verification_after_send_is_reported_at_once(where):
+    with sync_playwright() as playwright:
+        browser, page = _open(playwright, SITES["zai"])
+        result = page.evaluate(ZAI_VERIFY, [PROMPT, where, False])
+        browser.close()
+    assert result["status"] == "login", result
+    assert result["detail"] == "Z.ai 要求人机验证，请在页面上完成后重试"
+    assert result["clicks"] == 1  # 不重试、不点验证
+    assert result["elapsed"] < 6000  # 不是等到 90 秒超时
+    assert result["empty"] is True
+
+
+def test_zai_old_verification_text_on_the_page_does_not_stop_a_normal_reply():
+    with sync_playwright() as playwright:
+        browser, page = _open(playwright, SITES["zai"])
+        result = page.evaluate(ZAI_VERIFY, [PROMPT, "none", True])
+        browser.close()
+    assert result["status"] == "complete", result
+    assert result["text"] == "你好！"
+    assert result["clicks"] == 1

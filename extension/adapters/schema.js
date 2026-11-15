@@ -7,7 +7,7 @@
   const MAX_LIST = 12;
   const ROLE_KEYS = ["composer", "send", "stop", "users", "user_text", "assistants", "host", "body", "exclude", "done_near", "messages", "column"];
   const FLAG_KEYS = { writer: ["native", "exec"], guard_other: "bool", wait_send_enabled: "bool", click_center: "bool", click_inner: "sel", send_after_input: "bool" };
-  const SITE_KEYS = ["engine", "label", "origins", "roles", "disabled", "stop_find", "flags", "placeholder_text", "streaming", "done", "conv_url", "gates"];
+  const SITE_KEYS = ["engine", "label", "origins", "roles", "disabled", "stop_find", "flags", "placeholder_text", "streaming", "done", "conv_url", "gates", "error_texts"];
   const COMMON_KEYS = ["dialogs", "toasts", "captcha_boxes", "captcha", "login", "not_login"];
   const TOP_KEYS = ["schema", "schema_version", "version", "min_extension", "source", "common", "sites"];
 
@@ -111,6 +111,14 @@
       }
     }
     for (const key of ["placeholder_text", "conv_url"]) if (site[key] !== undefined && !regexOk(site[key])) bad(key);
+    // 发出之后才出现的报错（人机验证、发送失败等）：只是正则文本加回报文字，在等待回复时检查。
+    if (site.error_texts !== undefined) {
+      if (!Array.isArray(site.error_texts) || site.error_texts.length > MAX_LIST) bad("error_texts");
+      else site.error_texts.forEach((e, i) => {
+        const keys = Object.keys(e || {});
+        if (keys.some((k) => !["pattern", "detail"].includes(k)) || !regexOk(e.pattern) || !str(e.detail, 200)) bad(`error_texts[${i}]`);
+      });
+    }
     if (site.gates !== undefined) {
       if (!Array.isArray(site.gates) || site.gates.length > MAX_LIST) bad("gates");
       else site.gates.forEach((g, i) => {
@@ -154,7 +162,19 @@
     return { ok: errors.length === 0, errors };
   }
 
-  const api = { validateRegistry, compareVersion };
+  // 远端检查结果的缓存还能不能用：扩展版本、内置注册表版本或远端地址变了，缓存的比较就过时了（0.5.1 实页上弹窗
+  // 还显示「远端 .1 不比内置 .1 新」，而内置早已是 .2）。超过间隔也要重新检查。
+  function registryCacheFresh(status, ctx) {
+    if (!status || !ctx) return false;
+    if (status.extension !== ctx.extension) return false;
+    if (status.bundled !== ctx.bundled) return false;
+    if ((status.url || "") !== (ctx.url || "")) return false;
+    const at = Date.parse(status.checked_at || "");
+    if (!Number.isFinite(at)) return false;
+    return (ctx.now == null ? Date.now() : ctx.now) - at < ctx.everyMs;
+  }
+
+  const api = { validateRegistry, compareVersion, registryCacheFresh };
   root.ChatclumerRegistrySchema = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof globalThis !== "undefined" ? globalThis : this);

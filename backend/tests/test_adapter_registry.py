@@ -23,7 +23,7 @@ def registry():
     return json.loads(REG.read_text(encoding="utf-8"))
 
 
-def validate(data, ext="0.5.1"):
+def validate(data, ext="0.5.2"):
     script = (
         "const s=require(process.argv[1]);let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{"
         "console.log(JSON.stringify(s.validateRegistry(JSON.parse(d),process.argv[2])))})"
@@ -71,7 +71,12 @@ def test_schema_accepts_bundled_and_rejects_bad_data():
     for item in bad:
         assert validate(item)["ok"] is False
     assert validate(registry(), ext="0.4.4")["ok"] is False
-    assert validate(registry(), ext="0.5.0")["ok"] is False  # min_extension 0.5.1（send_after_input 是 0.5.1 才认识的开关）
+    assert validate(registry(), ext="0.5.0")["ok"] is False
+    assert validate(registry(), ext="0.5.1")["ok"] is False  # min_extension 0.5.2（error_texts 是 0.5.2 才认识的键）
+    for broken in ({"pattern": {"source": "(", "flags": ""}, "detail": "x"}, {"pattern": {"source": "a", "flags": ""}, "detail": ""},
+                   {"pattern": {"source": "a", "flags": ""}, "detail": "x", "click": ".retry"}):
+        k = registry(); k["sites"]["zai"]["error_texts"] = [broken]
+        assert validate(k)["ok"] is False
     j = registry(); j["sites"]["qwen"]["flags"]["send_after_input"] = "yes"; bad.append(j)
     assert validate(j)["ok"] is False
 
@@ -110,3 +115,26 @@ def test_heartbeat_health_shows_on_the_member_and_registry_is_served(tmp_path):
     assert member["web_health"]["ok"] is False and member["web_health"]["missing"] == ["send"]
     served = client.get("/api/adapters/registry").json()
     assert served["version"] == registry()["version"]
+
+
+@pytest.mark.skipif(not NODE, reason="node not installed")
+def test_registry_cache_is_stale_after_extension_or_bundled_change():
+    script = (
+        "const s=require(process.argv[1]);const f=s.registryCacheFresh;const now=Date.parse('2026-11-15T06:00:00Z');"
+        "const st={extension:'0.5.2',bundled:'2026.11.15.3',url:'https://x/r.json',checked_at:'2026-11-15T05:00:00Z'};"
+        "const c={extension:'0.5.2',bundled:'2026.11.15.3',url:'https://x/r.json',everyMs:6*3600e3,now};"
+        "console.log(JSON.stringify([f(st,c),f({...st,bundled:'2026.11.15.1'},c),f({...st,extension:'0.5.0'},c),"
+        "f({...st,url:'https://y'},c),f({...st,checked_at:'2026-11-14T20:00:00Z'},c),f(null,c),"
+        "f({detail:'远端 2026.11.15.1 不比内置 2026.11.15.1 新',checked_at:'2026-11-15T05:00:00Z'},c)]))"
+    )
+    out = subprocess.run([NODE, "-e", script, str(SCHEMA)], capture_output=True, text=True, check=True)
+    # 同版本、同内置、同地址、未过期才算新鲜；0.5.0 留下的旧状态（没有版本字段）一律过时。
+    assert json.loads(out.stdout) == [True, False, False, False, False, False, False]
+
+
+def test_background_refreshes_registry_on_install_and_popup_open():
+    bg = (ROOT / "extension" / "background.js").read_text(encoding="utf-8")
+    popup = (ROOT / "extension" / "popup.js").read_text(encoding="utf-8")
+    assert "chrome.runtime.onInstalled.addListener" in bg and "refreshRegistry(true)" in bg
+    assert "registryCacheFresh" in bg and 'type === "registry-status"' in bg
+    assert 'type: "registry-status"' in popup and "adapters/registry.json" in popup
