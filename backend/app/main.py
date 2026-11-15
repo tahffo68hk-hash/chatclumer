@@ -24,6 +24,37 @@ from .util import reason_label, redact, status_label
 from .webbridge import SITE_STATUS, SITES, WebBridge, origin_of, site_for_origin
 
 ROOT = Path(__file__).resolve().parent.parent
+
+# 后端和扩展桥（43124）只给本机用。即使有人把它绑到 0.0.0.0，非回环来源也会被拒绝。
+# 手机经由前端 43123 访问，前端在那里做配对认证，再从回环地址反代到这里。
+_LOCAL_CLIENTS = {"127.0.0.1", "::1", "localhost", "testclient"}
+
+
+def is_local_client(host: str | None) -> bool:
+    if not host:
+        return False
+    host = host[7:] if host.startswith("::ffff:") else host
+    return host in _LOCAL_CLIENTS or host.startswith("127.")
+
+
+class LoopbackOnly:
+    """Pure ASGI middleware (keeps SSE streaming intact)."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] in ("http", "websocket"):
+            client = scope.get("client")
+            if not is_local_client(client[0] if client else None):
+                if scope["type"] == "websocket":
+                    await send({"type": "websocket.close", "code": 1008})
+                    return
+                body = b'{"detail":"backend is loopback-only"}'
+                await send({"type": "http.response.start", "status": 403, "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode())]})
+                await send({"type": "http.response.body", "body": body})
+                return
+        await self.app(scope, receive, send)
 DATA = ROOT / "data"
 FIXTURE_HTML = """<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><title>本地网页夹具</title></head>
@@ -375,6 +406,7 @@ def create_app(db_path: str | None = None, secrets_path: str | None = None, prov
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(LoopbackOnly)
 
     @app.get("/api/health")
     def health():

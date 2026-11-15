@@ -62,7 +62,7 @@ def test_install_sh_dry_run_checks_versions_and_prints_chinese_steps():
     assert re.search(r"^\s*sudo\b", text, re.M) is None
     lan = _run(["bash", "scripts/install.sh", "--dry-run"], env={"LAN": "1"})
     assert lan.returncode == 0, lan.stderr
-    assert "警告：前端将监听 0.0.0.0。此服务没有登录认证，不要暴露到公网或做端口转发。" in lan.stdout
+    assert "警告：前端将监听 0.0.0.0（手机模式）。局域网里的设备必须先扫电脑上「手机连接」的二维码配对，未配对一律拒绝。不要暴露到公网或做端口转发。" in lan.stdout
     assert "后端仍只绑定 127.0.0.1，浏览器通过前端反代访问。" in lan.stdout
 
 
@@ -122,7 +122,7 @@ def test_install_ps1_and_start_ps1_keep_the_documented_contract():
         "不会创建虚拟环境",
         "已经在运行",
         "LAN",
-        "没有登录认证",
+        "扫码配对",
     ):
         assert phrase in install, phrase
     assert "RunAsAdministrator" not in install
@@ -130,7 +130,7 @@ def test_install_ps1_and_start_ps1_keep_the_documented_contract():
     assert "sudo" not in install
     assert "其他进程占用" in start
     assert "multi-llm-chat-room" in start
-    assert "警告：前端将监听 0.0.0.0。此服务没有登录认证，不要暴露到公网或做端口转发。" in start
+    assert "警告：前端将监听 0.0.0.0（手机模式）。局域网里的设备必须先扫电脑上「手机连接」的二维码配对，未配对一律拒绝。不要暴露到公网或做端口转发。" in start
     assert "后端仍只绑定 127.0.0.1" in start
     assert "Stop-Tree" in stop
     assert "没有结束该进程" in stop

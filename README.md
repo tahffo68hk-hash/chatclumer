@@ -60,13 +60,7 @@ bash scripts/start.sh
 
 Windows 使用 `scripts/start.ps1` 和 `scripts/stop.ps1`，同样只绑定回环地址。这两份脚本在 Linux 上做过静态核对：缺少 Python 或 Node 会停并说明要装什么；启动前检查端口；就绪要看到 `multi-llm-chat-room`；停止只沿记下的进程树结束。本仓库没有在 Windows 上实际跑过它们。
 
-只有在你接受无登录风险时才打开局域网前端：
-
-```bash
-LAN=1 bash scripts/install.sh
-```
-
-`install.sh` 会把 `LAN=1` 交给 `scripts/start.sh`。前端会监听 `0.0.0.0:43123` 并打印警告。后端仍在 `127.0.0.1`。不要把没有认证的服务暴露到公网。Windows 的 `install.ps1` 同样把 `LAN=1` 交给 `start.ps1`。
+要在手机上用，见下面的「手机使用」。
 
 ## 一键安装
 
@@ -103,6 +97,26 @@ python3 scripts/build_release.py --out dist
 - `SHA256SUMS`：上面两个 zip 的校验和。应用包里面另有一份源文件校验和。
 
 推送 `v*` tag 时，`.github/workflows/release.yml` 会跑测试、打这两个包，并挂到同名的 GitHub Release。普通提交不会发版。本仓库的说明不代替你自己去创建 tag。
+
+## 手机使用（安卓 / iPhone）
+
+网页 AI 仍然在电脑上的浏览器扩展里运行，手机只是遥控器：发消息、看回复、看现场。电脑要开机，ChatCluster 要在跑。
+
+1. 在电脑上用手机模式启动：`LAN=1 bash scripts/start.sh`（Windows：`$env:LAN="1"; .\scripts\start.ps1`）。不加 `LAN=1` 时前端只听 `127.0.0.1`，手机连不上。
+2. 在电脑上打开 http://127.0.0.1:43123 ，点顶部「手机连接」。面板列出电脑的局域网地址和 Tailscale 地址（`100.x`），二维码默认是模糊的，点一下才显示。
+3. 手机扫码：
+   - **安卓 App**：选「安卓 App 扫码」，用 ChatCluster 安卓 App 扫。二维码内容是 `chatclumer://pair?u=<电脑地址>&t=<口令>`。
+   - **iPhone / 安卓浏览器**：选「iPhone / 浏览器扫码」，用相机扫，会打开 `http://电脑IP:43123/m/pair?token=…`，配对后进入群聊。再点 Safari「分享 → 添加到主屏幕」（安卓 Chrome 是菜单里的「添加到主屏幕」），就能像 App 一样全屏打开。iPhone 从主屏幕打开时不和 Safari 共用登录状态，第一次会让你粘贴配对链接（面板里的「复制链接」）。
+4. **在外面用**：电脑和手机都装免费的 [Tailscale](https://tailscale.com/download) 并登录同一个账号，面板里会多出一个 `100.x` 地址，扫那个二维码即可。不需要也不要做端口转发或公网穿透。
+
+安全说明：
+
+- 手机模式下只有前端 `43123` 监听 `0.0.0.0`。后端和扩展桥 `43124` 仍只绑定 `127.0.0.1`，并且拒绝所有非回环来源。
+- 电脑本机访问不需要口令，和以前一样。其他设备的每个请求（页面、`/backend` 接口、事件流）都必须带配对后的 `cc_session` Cookie（HttpOnly、SameSite=Lax）或 `Authorization: Bearer <口令>`，否则接口返回 401，页面显示「请先在电脑上扫码」。认证在前端服务器按真实连接地址判断，不信任 `X-Forwarded-For`。
+- 口令 256 位随机，首次用 `LAN=1` 启动时生成，存在 `backend/data/mobile_token.json`（已 gitignore，不会打印到终端或日志）。同一 IP 在 10 分钟内提交 10 个不同的错误口令后会被暂时拒绝。
+- 换口令：面板里点「更换口令」，或 `cd frontend && npm run mobile-token -- rotate`。换完旧的配对立即失效，手机要重新扫码。
+- 二维码和配对链接等同于钥匙。只在自己家的 Wi-Fi 或 Tailscale 里用，咖啡馆、公司等公共 Wi-Fi 上不要开手机模式。连接是 http，同一 Wi-Fi 里能抓包的人理论上能看到内容；Tailscale 链路本身是加密的。
+- 给 App 用的探测接口：`GET /m/ping` 返回 `{"app":"chatclumer","version":"…","auth":true|false}`，不含任何秘密。
 
 ## 桌面壳（原型）
 
@@ -193,6 +207,7 @@ flowchart LR
 backend/          FastAPI、SQLite、调度和扩展桥
 backend/eval/     评测：固定题集、单模型 vs 群聊、报告（自带的是模拟结果）
 frontend/         Next.js 房间界面
+frontend/server/  前端服务器（包住 Next）：手机/局域网配对认证、/m/ping、/m/pair
 extension/        Chrome MV3 内容脚本、后台和弹窗
 extension/adapters/  适配器注册表（registry.json）、结构校验、运行时（页面检查、诊断快照）
 desktop/          Electron 桌面壳原型（复用扩展脚本和注册表，未实页验证）
@@ -202,6 +217,9 @@ docs/             站点记录、桌面壳说明、交接和截图
 ```
 
 ## 测试
+
+
+手机访问：`cd frontend && npm run test:mobile`（认证层 node 单测，pytest 也会调用），`backend/tests/test_mobile_access.py`（后端和扩展桥拒绝非回环来源）。界面检查：`LAN=1 bash scripts/start.sh` 后运行 `python scripts/check_mobile_ui.py <电脑局域网IP>`，截图里二维码保持模糊。
 
 普通后端套件不安装浏览器库也能收集。`skipped` 是可选浏览器测试，不能把它算进 passed。
 

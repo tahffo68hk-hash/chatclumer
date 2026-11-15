@@ -11,6 +11,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { RichText } from "@/components/rich-text";
+import { MobileConnect, useMobileInfo } from "@/components/mobile-connect";
 import { api, eventUrl, reconnectDelay } from "@/lib/api";
 import type { CatalogItem, ChatMessage, HighlightCard, Member, RoomGroup, Session, SplitItem } from "@/lib/types";
 
@@ -176,6 +177,8 @@ export function ChatApp() {
   const [preview, setPreview] = useState("");
   const [audience, setAudience] = useState("all");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const mobile = useMobileInfo();
   const [theme, setTheme] = useState<"light" | "dark" | "system">("system");
   const [textSize, setTextSize] = useState("normal");
   const [link, setLink] = useState<"ok" | "down">("ok");
@@ -582,7 +585,7 @@ export function ChatApp() {
   const mode = session?.mode || "free_chat";
 
   return (
-    <div className="room-app flex h-dvh flex-col bg-[#efe8dc] text-[#1c1915]">
+    <div className="room-app flex h-dvh flex-col overflow-x-hidden bg-[#efe8dc] pt-[env(safe-area-inset-top)] text-[#1c1915]">
       <div className="grid min-h-0 flex-1 lg:grid-cols-[280px_minmax(0,1fr)_320px]">
         <aside className={`${pane === "people" ? "flex" : "hidden"} min-h-0 flex-col bg-[#1b1916] text-[#f6f1e8] lg:flex`}>
           <div className="flex items-center justify-between px-4 py-4">
@@ -704,8 +707,11 @@ export function ChatApp() {
         <main className={`${pane === "chat" ? "flex" : "hidden"} min-h-0 min-w-0 flex-col lg:flex`}>
           <header className="border-b border-[#e4d8c8] bg-[#f7f3eb] px-4 py-3">
             <div className="flex flex-wrap items-center gap-2">
-              <h2 className="serif text-2xl">{session?.title || "选择一个房间"}</h2>
+              <h2 className="serif w-full min-w-0 truncate text-xl sm:w-auto sm:text-2xl">{session?.title || "选择一个房间"}</h2>
               <Button data-testid="open-settings" size="sm" variant="outline" onClick={() => setSettingsOpen(true)}>设置</Button>
+              {mobile.info && (
+                <Button data-testid="open-mobile" size="sm" variant="outline" onClick={() => { void mobile.reload(); setMobileOpen(true); }}>手机连接</Button>
+              )}
               <Button data-testid="open-cards" size="sm" variant="outline" disabled={!currentId} onClick={() => setCardsOpen(true)}>收藏</Button>
               <Button data-testid="open-splits" size="sm" variant="outline" disabled={!currentId} onClick={() => {
                 if (!currentId) return;
@@ -992,7 +998,7 @@ export function ChatApp() {
         </aside>
       </div>
 
-      <nav className="grid grid-cols-3 border-t border-[#e4d8c8] bg-[#f7f3eb] p-2 lg:hidden">
+      <nav className="grid grid-cols-3 border-t border-[#e4d8c8] bg-[#f7f3eb] p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] lg:hidden">
         {(
           [
             ["people", "会话"],
@@ -1005,6 +1011,8 @@ export function ChatApp() {
           </button>
         ))}
       </nav>
+
+      <MobileConnect open={mobileOpen} onOpenChange={setMobileOpen} info={mobile.info} setInfo={mobile.setInfo} />
 
       <Dialog open={cardsOpen} onOpenChange={setCardsOpen}>
         <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">

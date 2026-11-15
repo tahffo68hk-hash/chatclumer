@@ -12,6 +12,11 @@ async function proxy(req: NextRequest, ctx: { params: Promise<{ path: string[] }
   headers.delete("host");
   headers.delete("connection");
   headers.delete("content-length");
+  // 后端只接受回环来源（uvicorn 会信任来自 127.0.0.1 的 X-Forwarded-For）。认证已经在
+  // frontend/server/mobile-auth.mjs 里按真实 socket 地址做完，这里不再把手机 IP 转给后端。
+  for (const name of ["x-forwarded-for", "x-forwarded-host", "x-forwarded-proto", "x-forwarded-port", "x-real-ip", "forwarded"]) {
+    headers.delete(name);
+  }
   const hasBody = req.method !== "GET" && req.method !== "HEAD";
   const res = await fetch(url, {
     method: req.method,

@@ -10,7 +10,7 @@ FRONT_PORT=43123
 BACK_PORT=43124
 if [[ "$LAN" == "1" ]]; then
   FRONT_HOST="0.0.0.0"
-  echo "警告：前端将监听 0.0.0.0。此服务没有登录认证，不要暴露到公网或做端口转发。"
+  echo "警告：前端将监听 0.0.0.0（手机模式）。局域网里的设备必须先扫电脑上「手机连接」的二维码配对，未配对一律拒绝。不要暴露到公网或做端口转发。"
   echo "后端仍只绑定 127.0.0.1，浏览器通过前端反代访问。"
 fi
 mkdir -p .run backend/data
@@ -86,7 +86,7 @@ if [[ -z "$FRONT_PID" ]]; then
     --cwd "$ROOT/frontend" \
     --token "$TOKEN" \
     -- \
-    "$ROOT/frontend/node_modules/.bin/next" dev --turbopack -H "$FRONT_HOST" -p "$FRONT_PORT"
+    node "$ROOT/frontend/server/index.mjs" --dev -H "$FRONT_HOST" -p "$FRONT_PORT"
 fi
 
 for _ in $(seq 1 80); do
@@ -100,6 +100,9 @@ for _ in $(seq 1 80); do
   fi
   if service_ready; then
     echo "ready http://127.0.0.1:${FRONT_PORT}"
+    if [[ "$LAN" == "1" ]]; then
+      echo "手机连接：在电脑上打开上面的地址，点「手机连接」，用手机扫码。口令不会打印在终端里。"
+    fi
     exit 0
   fi
   if [[ -f .run/backend.pid ]] && ! kill -0 "$(cat .run/backend.pid)" 2>/dev/null; then

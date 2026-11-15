@@ -57,10 +57,10 @@ function Write-NodeHint {
 
 function Write-LanWarning {
   if ($env:LAN -eq "1") {
-    Write-Host "警告：前端将监听 0.0.0.0。此服务没有登录认证，不要暴露到公网或做端口转发。"
+    Write-Host "警告：前端将监听 0.0.0.0（手机模式）。局域网里的设备必须先扫电脑上「手机连接」的二维码配对，未配对一律拒绝。不要暴露到公网或做端口转发。"
     Write-Host "后端仍只绑定 127.0.0.1，浏览器通过前端反代访问。"
   } else {
-    Write-Host "默认只监听 127.0.0.1。只有在你接受无登录风险时才使用 LAN=1。"
+    Write-Host "默认只监听 127.0.0.1。要用手机访问时用 LAN=1 启动（需扫码配对，只建议在自己家的 Wi-Fi 或 Tailscale 里用）。"
   }
 }
 

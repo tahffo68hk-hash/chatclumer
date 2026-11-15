@@ -1,6 +1,6 @@
 # Windows 启动。后端只绑定回环地址。没有认证时不要改成 0.0.0.0 后暴露到公网。
 # 需要已安装 Python 3.11+ 与 Node.js 22。停止用 scripts/stop.ps1，它只结束本次记下的进程树。
-# LAN=1 时前端改为 0.0.0.0，并先打印无登录警告。后端仍然只绑定 127.0.0.1。
+# LAN=1 时前端改为 0.0.0.0（手机模式，非本机请求必须扫码配对）。后端仍然只绑定 127.0.0.1。
 $ErrorActionPreference = "Stop"
 function Require-Tool([string]$Name, [string]$Hint) {
   if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) {
@@ -28,7 +28,7 @@ Set-Location (Split-Path -Parent $PSScriptRoot)
 $frontHost = "127.0.0.1"
 if ($env:LAN -eq "1") {
   $frontHost = "0.0.0.0"
-  Write-Host "警告：前端将监听 0.0.0.0。此服务没有登录认证，不要暴露到公网或做端口转发。"
+  Write-Host "警告：前端将监听 0.0.0.0（手机模式）。局域网里的设备必须先扫电脑上「手机连接」的二维码配对，未配对一律拒绝。不要暴露到公网或做端口转发。"
   Write-Host "后端仍只绑定 127.0.0.1，浏览器通过前端反代访问。"
 }
 Assert-PortFree 43124
@@ -53,7 +53,7 @@ $env:CHAT_ROOM_RUN = $token
 $backend = Start-Process -FilePath "backend\.venv\Scripts\uvicorn.exe" -ArgumentList "app.main:app","--app-dir","backend","--host","127.0.0.1","--port","43124" -WindowStyle Hidden -PassThru -RedirectStandardOutput ".run\backend.log" -RedirectStandardError ".run\backend.err.log"
 Set-Content -Path ".run\backend.pid" -Value $backend.Id
 Push-Location frontend
-$frontend = Start-Process -FilePath "node.exe" -ArgumentList ".\node_modules\next\dist\bin\next","dev","--turbopack","-H",$frontHost,"-p","43123" -WindowStyle Hidden -PassThru -RedirectStandardOutput "..\.run\frontend.log" -RedirectStandardError "..\.run\frontend.err.log"
+$frontend = Start-Process -FilePath "node.exe" -ArgumentList ".\server\index.mjs","--dev","-H",$frontHost,"-p","43123" -WindowStyle Hidden -PassThru -RedirectStandardOutput "..\.run\frontend.log" -RedirectStandardError "..\.run\frontend.err.log"
 Pop-Location
 Set-Content -Path ".run\frontend.pid" -Value $frontend.Id
 Remove-Item Env:CHAT_ROOM_RUN

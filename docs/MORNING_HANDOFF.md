@@ -27,7 +27,7 @@ git status --short
 bash scripts/start.sh
 ```
 
-停止：`bash scripts/stop.sh`。Windows 用 `scripts/start.ps1` 和 `scripts/stop.ps1`。脚本会先检查 `node`、`npm` 和 `py`/`python`，缺了就停并说明要装 Python 3.11+ 与 Node.js 22。前后端都只绑定 `127.0.0.1`。`LAN=1 bash scripts/start.sh` 才会让前端听 `0.0.0.0`，并打印无登录警告。
+停止：`bash scripts/stop.sh`。Windows 用 `scripts/start.ps1` 和 `scripts/stop.ps1`。脚本会先检查 `node`、`npm` 和 `py`/`python`，缺了就停并说明要装 Python 3.11+ 与 Node.js 22。前后端都只绑定 `127.0.0.1`。`LAN=1 bash scripts/start.sh` 才会让前端听 `0.0.0.0`（手机模式，非本机请求必须扫码配对，见 README「手机使用」）。
 
 启动把后端和前端各自放进新会话，只在子进程上写下 `CHAT_ROOM_RUN` 标记。停止只向带这个标记的进程及其子进程发信号，不会按端口或进程名去结束别的服务。43123 或 43124 上如果已经有其他进程，启动立刻退出并写明 PID，不会干等健康检查，也不会把那个进程的 HTTP 200 当成就绪。就绪必须是本项目的 `/api/health` 和前端反代都返回 `"service":"multi-llm-chat-room"`。停止后若端口仍被占用，脚本退出码为 1，并说明自己没有结束那个 PID。旧版 `stop.sh` 只杀掉当时记下的父进程，`npx` 拉起的 `next dev` 和 `next-server` 会留下来；那种没有标记的旧进程，新脚本同样不会代为结束。
 

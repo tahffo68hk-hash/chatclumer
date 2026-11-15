@@ -1,10 +1,21 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import Script from "next/script";
 import "./globals.css";
 
 export const metadata: Metadata = {
   title: "多模型群聊",
   description: "一个共享时间线的多模型聊天房间。演示回复会标明不是真实模型。",
+  applicationName: "ChatCluster",
+  appleWebApp: { capable: true, title: "ChatCluster", statusBarStyle: "black-translucent" },
+  icons: { icon: "/icons/icon-192.png", apple: "/apple-touch-icon.png" },
+  formatDetection: { telephone: false },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: "#1b1916",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
