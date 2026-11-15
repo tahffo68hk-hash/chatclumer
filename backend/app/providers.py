@@ -16,7 +16,7 @@ from .secrets import SecretStore
 from .summary import build_summary
 from .util import excerpt, new_id, redact
 
-PAID_PROVIDERS = {"openai", "anthropic", "gemini", "deepseek", "qwen", "openai_compatible", "xai", "openrouter"}
+PAID_PROVIDERS = {"openai", "anthropic", "gemini", "deepseek", "qwen", "openai_compatible", "xai", "openrouter", "siliconflow"}
 ZERO_COST_PROVIDERS = {"demo", "ollama"}
 
 DEFAULT_BASE = {
@@ -24,6 +24,7 @@ DEFAULT_BASE = {
     "openrouter": "https://openrouter.ai/api/v1",
     "deepseek": "https://api.deepseek.com",
     "qwen": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "siliconflow": "https://api.siliconflow.cn/v1",
     "xai": "https://api.x.ai/v1",
     "anthropic": "https://api.anthropic.com",
     "gemini": "https://generativelanguage.googleapis.com",
@@ -37,6 +38,7 @@ DEFAULT_KEY_ENV = {
     "openrouter": "OPENROUTER_API_KEY",
     "deepseek": "DEEPSEEK_API_KEY",
     "qwen": "DASHSCOPE_API_KEY",
+    "siliconflow": "SILICONFLOW_API_KEY",
     "xai": "XAI_API_KEY",
     "openai_compatible": "OPENAI_COMPATIBLE_API_KEY",
 }
@@ -49,11 +51,32 @@ CATALOG = [
     {"provider": "xai", "label": "xAI Grok", "model_id": "grok-4", "paid": True, "key_env": "XAI_API_KEY", "note": "可能计费"},
     {"provider": "deepseek", "label": "DeepSeek", "model_id": "deepseek-chat", "paid": True, "key_env": "DEEPSEEK_API_KEY", "note": "可能计费"},
     {"provider": "qwen", "label": "通义千问", "model_id": "qwen-plus", "paid": True, "key_env": "DASHSCOPE_API_KEY", "note": "可能计费"},
+    {"provider": "siliconflow", "label": "硅基流动 SiliconFlow", "model_id": "Qwen/Qwen2.5-7B-Instruct", "paid": True, "key_env": "SILICONFLOW_API_KEY", "note": "OpenAI 兼容，可能计费"},
     {"provider": "openrouter", "label": "OpenRouter 免费模型", "model_id": "meta-llama/llama-3.2-3b-instruct:free", "paid": False, "key_env": "OPENROUTER_API_KEY", "note": "仅 :free 模型视为零费用"},
     {"provider": "ollama", "label": "Ollama 本地", "model_id": "qwen2.5:7b", "paid": False, "key_env": "", "note": "不下载模型，只连接已有服务"},
     {"provider": "openai_compatible", "label": "OpenAI 兼容接口", "model_id": "", "paid": True, "key_env": "OPENAI_COMPATIBLE_API_KEY", "note": "本机地址视为零费用"},
     {"provider": "web", "label": "网页会话", "model_id": "web:fixture", "paid": False, "key_env": "", "note": "费用未知，不按 0 计算。只绑定你授权的标签页。"},
 ]
+
+
+for _item in CATALOG:
+    _item.setdefault("base_url", DEFAULT_BASE.get(_item["provider"], ""))
+
+
+async def ollama_models(base: str, client_factory=None) -> dict:
+    """List models of a local Ollama. Only loopback addresses; no download, no paid call."""
+    if not is_local_base(base):
+        return {"ok": False, "models": [], "detail": "只查询本机 Ollama（127.0.0.1 / localhost）"}
+    factory = client_factory or (lambda: httpx.AsyncClient(timeout=httpx.Timeout(2.0, connect=1.0), trust_env=False))
+    try:
+        async with factory() as client:
+            response = await client.get(base.rstrip("/") + "/api/tags")
+        if response.status_code != 200:
+            return {"ok": False, "models": [], "detail": f"Ollama 返回 HTTP {response.status_code}"}
+        names = [str(item.get("name")) for item in (response.json().get("models") or []) if item.get("name")]
+        return {"ok": True, "models": names[:100], "detail": f"找到 {len(names)} 个本机模型" if names else "Ollama 在运行，但还没有模型"}
+    except Exception as exc:  # noqa: BLE001 - 连不上就如实回报
+        return {"ok": False, "models": [], "detail": f"没有连上本机 Ollama：{redact(type(exc).__name__)}"}
 
 
 class ProviderError(Exception):

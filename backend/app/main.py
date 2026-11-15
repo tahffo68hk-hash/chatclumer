@@ -536,6 +536,13 @@ def create_app(db_path: str | None = None, secrets_path: str | None = None, prov
         )
         return updated
 
+    @app.get("/api/providers/ollama/models")
+    async def ollama_list():
+        from .providers import DEFAULT_BASE, ollama_models
+
+        base = secret_store.get("OLLAMA_BASE_URL") or DEFAULT_BASE["ollama"]
+        return await ollama_models(base)
+
     @app.get("/api/catalog")
     def catalog():
         return {"providers": CATALOG, "modes": sorted(MODES)}

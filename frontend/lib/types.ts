@@ -130,6 +130,7 @@ export type CatalogItem = {
   model_id: string;
   paid: boolean;
   key_env: string;
+  base_url?: string;
   note: string;
 };
 

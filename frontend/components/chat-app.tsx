@@ -334,6 +334,18 @@ export function ChatApp() {
     };
   }, [currentId, loadRoom]);
 
+  const [ollama, setOllama] = useState<{ models: string[]; detail: string }>({ models: [], detail: "" });
+  useEffect(() => {
+    if (memberForm.provider !== "ollama") return;
+    let stop = false;
+    api.ollamaModels()
+      .then((data) => !stop && setOllama({ models: data.models, detail: data.detail }))
+      .catch(() => !stop && setOllama({ models: [], detail: "没有连上本机 Ollama" }));
+    return () => {
+      stop = true;
+    };
+  }, [memberForm.provider]);
+
   const sessionRef = useRef(session);
   sessionRef.current = session;
 
@@ -1156,9 +1168,24 @@ export function ChatApp() {
               ))}
             </select>
             <Label>精确模型 ID</Label>
-            <Input data-testid="member-model" value={memberForm.model_id} onChange={(event) => setMemberForm({ ...memberForm, model_id: event.target.value })} />
+            <Input data-testid="member-model" list="model-suggestions" value={memberForm.model_id} onChange={(event) => setMemberForm({ ...memberForm, model_id: event.target.value })} />
+            <datalist id="model-suggestions">
+              {(memberForm.provider === "ollama" ? ollama.models : []).map((name) => (
+                <option key={name} value={name} />
+              ))}
+            </datalist>
+            {memberForm.provider === "ollama" && (
+              <p data-testid="ollama-status" className="text-xs text-[#6b6258]">
+                {ollama.detail || "正在查看本机 Ollama…"}
+              </p>
+            )}
             <Label>API Base（可选）</Label>
-            <Input value={memberForm.api_base} onChange={(event) => setMemberForm({ ...memberForm, api_base: event.target.value })} />
+            <Input
+              data-testid="member-api-base"
+              placeholder={catalog.find((item) => item.provider === memberForm.provider)?.base_url || "例如 http://127.0.0.1:11434 或 https://…/v1"}
+              value={memberForm.api_base}
+              onChange={(event) => setMemberForm({ ...memberForm, api_base: event.target.value })}
+            />
             {memberError && <p data-testid="member-error" className="rounded-lg bg-[#fee4e2] px-3 py-2 text-sm text-[#b42318]">{memberError}</p>}
             <Label>密钥变量名（不在这里填密钥）</Label>
             <Input value={memberForm.api_key_env} onChange={(event) => setMemberForm({ ...memberForm, api_key_env: event.target.value })} />

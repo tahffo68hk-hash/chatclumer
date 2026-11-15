@@ -24,6 +24,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   health: () => request<{ ok: boolean }>("/api/health"),
   catalog: () => request<{ providers: CatalogItem[] }>("/api/catalog"),
+  ollamaModels: () => request<{ ok: boolean; models: string[]; detail: string }>("/api/providers/ollama/models"),
   secrets: () => request<{ secrets: { name: string; configured: boolean }[]; allow_paid: boolean }>("/api/secrets/status"),
   saveSecret: (name: string, value: string) => request("/api/secrets", { method: "PUT", body: JSON.stringify({ name, value }) }),
   allowPaid: (enabled: boolean) => request("/api/runtime/allow-paid", { method: "PUT", body: JSON.stringify({ enabled }) }),
