@@ -203,7 +203,11 @@ git status --short
 
 分组和网页桥提交后，用下面的命令核对。若其后只有记下哈希的修订，以 `git rev-parse HEAD` 为准，并确认功能提交仍是祖先。
 
-元宝登录后的发送、读回和转发核对记在这份交接里。功能提交仍是：
+DeepSeek 与豆包适配器在：
+
+`04ce11145995b54640b1ff53ab97f43a702a739f`
+
+元宝登录后的发送、读回和转发仍是祖先：
 
 `22e6489e2ea84f28eea1f25449bd1b63d178146c`
 
@@ -244,7 +248,7 @@ git status --short
 ```bash
 git rev-parse HEAD
 git log -1 --oneline
-git merge-base --is-ancestor 22e6489e2ea84f28eea1f25449bd1b63d178146c HEAD && echo ancestor-ok
+git merge-base --is-ancestor 04ce11145995b54640b1ff53ab97f43a702a739f HEAD && echo ancestor-ok
 git status --short
 ```
 
