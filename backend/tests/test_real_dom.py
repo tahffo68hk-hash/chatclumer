@@ -372,3 +372,85 @@ def test_real_dom_zhipu_framework_state_sees_the_write_before_the_one_click(trus
     # 先清空（合成事件），再用 execCommand 写入：浏览器产生的 input 事件是 isTrusted 的，框架只认可信事件时也能看到文字。
     # 0.4.3 的 guest.js 在同一模型下事件序列完全相同（synthetic, trusted）。
     assert result["events"] == ["synthetic", "trusted"]
+
+
+GLM_TARGET = """async ([prompt, mode, oldRegistry]) => {
+  if (oldRegistry) {
+    // 0.5.1 的注册表：智谱只有 click_center，没有 click_inner。
+    const reg = JSON.parse(JSON.stringify(ChatclumerAdapters.bundled()));
+    reg.version = "2099.1.1.1";
+    delete reg.sites.zhipu.flags.click_inner;
+    ChatclumerAdapters.useRemote(reg, "test");
+  }
+  const send = document.querySelector("#search-input-box div.enter.is-main-chat");
+  const icon = send.querySelector(".enter-icon-container");
+  const box = document.querySelector("#search-input-box textarea");
+  // 实页里发送键是小圆钮；导出没有站点 CSS 时它被排成整行宽，中心点总落在内层上。这里给出实页的形状。
+  send.style.cssText = "position: fixed; right: 24px; bottom: 24px; width: 32px; height: 32px; padding: 0;";
+  icon.style.cssText = "width: 32px; height: 32px;";
+  if (mode === "overlay") {
+    // 浮层（提示气泡、悬浮工具条等）盖住了发送键中心。
+    document.body.insertAdjacentHTML("beforeend", '<div id="cover" style="position: fixed; right: 0; bottom: 0; width: 120px; height: 120px; z-index: 99999;"></div>');
+  } else if (mode === "offscreen") {
+    send.style.bottom = "-200px";  // 小窗口或输入区滚出视口：elementFromPoint 返回 null
+  } else if (mode === "noinner") {
+    icon.className = "";  // 注册表里的内层选择器找不到时，退回中心点命中
+  }
+  const targets = [];
+  let model = "";
+  box.addEventListener("input", () => { model = box.value; icon.classList.toggle("empty", !model); });
+  icon.classList.add("empty");
+  document.addEventListener("pointerdown", (event) => { if (send.contains(event.target)) targets.push(event.target === icon ? "inner" : event.target === send ? "outer" : event.target.tagName.toLowerCase()); }, true);
+  // 实页站点把点击处理挂在内层图标上：点外层不会发出。
+  icon.addEventListener("click", () => {
+    if (!model) return;
+    document.body.insertAdjacentHTML("beforeend", '<div class="conversation question"><div class="question-txt"><span></span></div></div>');
+    document.querySelector(".conversation.question:last-child span").textContent = model;
+    model = ""; box.value = ""; icon.classList.add("empty");
+  });
+  const outcome = await guestDispatchSend("zhipu", document, prompt, 2500);
+  return { ok: outcome.ok, detail: outcome.detail || "", targets };
+}"""
+
+
+@pytest.mark.parametrize("mode", ["plain", "overlay", "offscreen"])
+def test_real_dom_zhipu_clicks_the_inner_icon_even_when_centre_hit_fails(mode):
+    with sync_playwright() as playwright:
+        browser, page = _open_state(playwright, "zhipu", "0-empty")
+        result = page.evaluate(GLM_TARGET, [PROMPT, mode, False])
+        browser.close()
+    assert result["targets"] == ["inner"], result
+    assert result["ok"] is True, result
+
+
+@pytest.mark.parametrize("mode", ["overlay", "offscreen"])
+def test_real_dom_zhipu_old_registry_falls_back_to_outer_and_says_why(mode):
+    # 复现 0.5.1 实页的失败形态：中心点命中失败 → 点了外层 div.enter.is-main-chat → 只点一次，回报「已填入，未发送」并写明原因。
+    with sync_playwright() as playwright:
+        browser, page = _open_state(playwright, "zhipu", "0-empty")
+        result = page.evaluate(GLM_TARGET, [PROMPT, mode, True])
+        browser.close()
+    assert result["targets"] == ["outer"]
+    assert result["ok"] is False
+    assert "div.enter.is-main-chat" in result["detail"]
+    why = "被其他元素盖住" if mode == "overlay" else "不在视口内"
+    assert why in result["detail"]
+
+
+def test_real_dom_zhipu_without_inner_uses_centre_hit():
+    with sync_playwright() as playwright:
+        browser, page = _open_state(playwright, "zhipu", "0-empty")
+        result = page.evaluate(
+            """async (prompt) => {
+              const send = document.querySelector("#search-input-box div.enter.is-main-chat");
+              send.style.cssText = "position: fixed; right: 24px; bottom: 24px; width: 32px; height: 32px; padding: 0;";
+              const icon = send.querySelector(".enter-icon-container");
+              icon.className = "";
+              icon.style.cssText = "width: 32px; height: 32px;";
+              const t = guestPickTarget("zhipu", send);
+              return { how: t.how, inside: send.contains(t.el) && t.el !== send };
+            }""",
+            PROMPT,
+        )
+        browser.close()
+    assert result == {"how": "中心点命中", "inside": True}

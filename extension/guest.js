@@ -81,6 +81,7 @@ function guestCompileSite(id, raw) {
     placeholderText: guestRx(raw.placeholder_text),
     convUrl: guestRx(raw.conv_url),
     gates: (raw.gates || []).map((g) => ({ test: guestRx(g.pattern), where: g.where, detail: g.detail })),
+    errorTexts: (raw.error_texts || []).map((e) => ({ test: guestRx(e.pattern), detail: e.detail })),
   };
   if (raw.disabled) spec.disabled = guestCond(raw.disabled);
   if (raw.stop_find) {
@@ -364,19 +365,28 @@ async function guestCommitPrompt(site, root, prompt, shouldAbort) {
 }
 
 // 点哪里：文心点发送图标本身；智谱点发送键中心处的元素；其余站点点按钮本身。事件都会冒泡到外层按钮，仍只点一次。
-function guestClickTarget(site, send) {
+// 点哪里，按顺序：注册表写明的内层元素（click_inner，不依赖命中测试）；中心点命中的子元素（click_center）；按钮本身。
+// 中心点命中依赖真实布局：按钮在视口外时 elementFromPoint 返回 null，被浮层盖住时命中的不在按钮里，
+// 内层不可命中时命中外层本身——这三种都会退回外层。所以能写明内层的站点都写明。事件仍只派发一次。
+function guestPickTarget(site, send) {
   const spec = guestSpec(site);
   if (spec && spec.clickInner) {
     const inner = send.querySelector(spec.clickInner);
-    if (inner) return inner;
+    if (inner) return { el: inner, how: "注册表内层" };
   }
   if (spec && spec.clickCenter) {
     const doc = send.ownerDocument || document;
     const rect = send.getBoundingClientRect();
     const hit = rect.width && rect.height ? doc.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2) : null;
-    if (hit && send.contains(hit)) return hit;
+    if (hit && hit !== send && send.contains(hit)) return { el: hit, how: "中心点命中" };
+    const why = !hit ? "中心点不在视口内" : hit === send ? "中心点命中外层" : "中心点被其他元素盖住";
+    return { el: send, how: `外层（${why}）` };
   }
-  return send;
+  return { el: send, how: "按钮本身" };
+}
+
+function guestClickTarget(site, send) {
+  return guestPickTarget(site, send).el;
 }
 
 // 页面上能看见的短句（卡片、标题、提示），不含聊天消息里的文字。只给声明了 where: "page" 的门槛用。
@@ -421,6 +431,71 @@ function guestGate(site, root) {
   if (dialogs.some((text) => common.login.test(text) && !common.notLogin.test(text))) return `${spec.label} 需要登录，请在该标签页登录一次后重试`;
   const loc = (root && root.defaultView && root.defaultView.location) || (typeof location !== "undefined" ? location : null);
   if (loc && /^\/(auth|login|sign_?in)(\/|$)/i.test(loc.pathname || "")) return `${spec.label} 需要登录，请在该标签页登录一次后重试`;
+  return null;
+}
+
+// 本次任务点击前一刻的页面：已有的助手消息和已经能看到的提示短句。
+// 发出后的报错只认点击之后新出现的：新助手消息、新提示条/弹窗、消息外新出现的短句；旧回复和旧提示里的文字不算。
+var guestTask = null;
+
+function guestNoticeTexts(site, root) {
+  const spec = guestSpec(site);
+  const common = guestCommon();
+  const texts = [];
+  const take = (el) => {
+    if (el && guestVisible(el)) texts.push((el.innerText || el.textContent || "").trim().slice(0, 800));
+  };
+  for (const selector of [common.toasts, common.dialogs]) {
+    try {
+      root.querySelectorAll(selector).forEach(take);
+    } catch {
+      /* 忽略无效选择器 */
+    }
+  }
+  // 消息外的短句（站点把报错直接放在列表底部时）：跳过用户消息、助手消息和输入框。
+  const doc = root.ownerDocument || root;
+  if (doc.body) {
+    const skip = [spec.users, spec.assistants, "textarea", "[contenteditable='true']"].filter(Boolean).join(", ");
+    const walker = doc.createTreeWalker(doc.body, 4);
+    let node = walker.nextNode();
+    let seen = 0;
+    while (node && seen < 400) {
+      const text = (node.nodeValue || "").trim();
+      if (text && text.length < 200) {
+        seen += 1;
+        const host = node.parentElement;
+        if (host && !host.closest(skip) && guestVisible(host)) texts.push(text);
+      }
+      node = walker.nextNode();
+    }
+  }
+  return texts.filter(Boolean);
+}
+
+function guestTrackBegin(site, root) {
+  const spec = guestSpec(site);
+  const checks = spec && spec.errorTexts && spec.errorTexts.length;
+  guestTask = {
+    site,
+    known: new WeakSet(guestAssistants(site, root)),
+    notices: new Set(checks ? guestNoticeTexts(site, root) : []),
+  };
+}
+
+// 发出之后页面给出的报错（注册表 error_texts）。只读页面，不点、不重试。返回回报文字或 null。
+// 没有本次任务的点击前快照（如页面刷新后续读）时不检查，免得把旧页面上的字当成这次的报错。
+function guestReplyError(site, root) {
+  const spec = guestSpec(site);
+  if (!spec || !spec.errorTexts || !spec.errorTexts.length) return null;
+  const task = guestTask && guestTask.site === site ? guestTask : null;
+  if (!task) return null;
+  const texts = guestNoticeTexts(site, root).filter((text) => !task.notices.has(text));
+  guestAssistants(site, root)
+    .filter((node) => !task.known.has(node) && guestVisible(node))
+    .forEach((node) => texts.push((node.innerText || node.textContent || "").slice(0, 800)));
+  for (const rule of spec.errorTexts) {
+    if (texts.some((text) => rule.test.test(text))) return rule.detail;
+  }
   return null;
 }
 
@@ -621,12 +696,19 @@ async function guestDispatchSend(site, root, prompt, timeoutMs, shouldAbort) {
       const ready = !!(live && guestMatchState(live, prompt) === "match");
       const send = guestSendUsable(site, root);
       if (ready && send) {
-        const target = guestClickTarget(site, send);
-        pressedOn = guestNodeLabel(target);
-        guestPress(target);
+        const pick = guestPickTarget(site, send);
+        pressedOn = `${guestNodeLabel(pick.el)}，${pick.how}`;
+        guestTrackBegin(site, root);
+        guestPress(pick.el);
         clicked = true;
       }
     } else {
+      const failed = guestReplyError(site, root);
+      if (failed) {
+        const left = guestComposer(site, root);
+        if (left && guestMatchState(left, prompt) === "match") guestClearComposer(left);
+        return { ok: false, detail: failed, clicked: true, gate: true };
+      }
       const how = guestConfirmed(site, root, prompt, before);
       if (how === "other") {
         const left = guestComposer(site, root);

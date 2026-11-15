@@ -2,8 +2,8 @@
 globalThis.CHATCLUMER_REGISTRY = {
   "schema": "chatclumer.adapters",
   "schema_version": 1,
-  "version": "2026.11.15.2",
-  "min_extension": "0.5.1",
+  "version": "2026.11.15.3",
+  "min_extension": "0.5.2",
   "source": "2026-11-15 实页 DOM 导出（dom-dumps）",
   "common": {
     "dialogs": [
@@ -324,7 +324,8 @@ globalThis.CHATCLUMER_REGISTRY = {
         "writer": "exec",
         "guard_other": true,
         "wait_send_enabled": true,
-        "click_center": true
+        "click_center": true,
+        "click_inner": ".enter-icon-container"
       },
       "streaming": [
         {
@@ -407,7 +408,16 @@ globalThis.CHATCLUMER_REGISTRY = {
       "conv_url": {
         "source": "/c/[\\w-]{8,}",
         "flags": ""
-      }
+      },
+      "error_texts": [
+        {
+          "pattern": {
+            "source": "verification required|please complete (the )?verification|verify (that )?you are human|需要(进行)?(人机|安全)?验证|请完成(人机|安全)?验证",
+            "flags": "i"
+          },
+          "detail": "Z.ai 要求人机验证，请在页面上完成后重试"
+        }
+      ]
     },
     "deepseek": {
       "engine": "builtin",

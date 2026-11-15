@@ -174,6 +174,7 @@ function guestAdapter(site) {
     partial: (node) => (ready() ? guestPartial(site, node) : ""),
     timeoutDetail: (beforeCount) => (ready() ? guestTimeoutNote(site, document, beforeCount) : "超时"),
     login: () => ready() && !!guestGate(site, document),
+    replyError: () => (ready() ? guestReplyError(site, document) : null),
     loginDetail: () => (ready() && guestGate(site, document)) || "页面停在登录或验证，没有点击发送",
     stop: () => (ready() ? guestStopTarget(site, document) : null),
     refuse: ready() ? "" : "游客站点适配器没有装上，不会发送，也不会用整页文字代替回复。",
@@ -270,6 +271,12 @@ async function waitNew(adapter, before, signal, prompt) {
         ? adapter.loginDetail()
         : "等待回复时页面停在登录，已停止，没有读取旧消息";
       return { status: "login", detail };
+    }
+    // 发出后才出现的报错（如人机验证）：马上结束，不等到超时，不重试。
+    const failed = typeof adapter.replyError === "function" ? adapter.replyError() : null;
+    if (failed) {
+      clickSiteStop();
+      return { status: "login", detail: failed };
     }
     const node = currentReply(adapter, before, prompt);
     const idle = typeof adapter.idle !== "function" || adapter.idle();

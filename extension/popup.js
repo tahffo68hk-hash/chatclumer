@@ -140,16 +140,26 @@ document.getElementById("dump").addEventListener("click", async () => {
   });
 });
 
+let bundledVersion = "";
+const bundledReady = fetch(chrome.runtime.getURL("adapters/registry.json"))
+  .then((r) => r.json())
+  .then((data) => { bundledVersion = data.version || ""; })
+  .catch(() => {});
+
 function showRegistry(status) {
   const el = document.getElementById("registry");
   const version = chrome.runtime.getManifest().version;
-  el.textContent = status
-    ? `扩展 ${version}。${status.detail || ""}（${status.checked_at || ""}）`
-    : `扩展 ${version}。还没有检查过远端注册表。`;
+  const bundled = bundledVersion || (status && status.bundled) || "?";
+  // 只有同一扩展版本、同一内置注册表做出的比较才显示；过时的缓存不再拿来说话。
+  const current = status && status.extension === version && (!bundledVersion || status.bundled === bundledVersion);
+  el.textContent = current
+    ? `扩展 ${version}，内置注册表 ${bundled}。${status.detail || ""}（${status.checked_at || ""}）`
+    : `扩展 ${version}，内置注册表 ${bundled}。正在重新检查远端注册表…`;
 }
 
-chrome.storage.local.get(["registryStatus", "registryUrl"]).then(({ registryStatus, registryUrl }) => {
+Promise.all([chrome.storage.local.get(["registryStatus", "registryUrl"]), bundledReady]).then(([{ registryStatus, registryUrl }]) => {
   showRegistry(registryStatus);
+  chrome.runtime.sendMessage({ type: "registry-status" }).then((fresh) => { if (fresh) showRegistry(fresh); }).catch(() => {});
   document.getElementById("registry-url").value = registryUrl || "";
   document.getElementById("registry-url").placeholder = "默认：chatclumer 仓库里的 registry.json";
 });

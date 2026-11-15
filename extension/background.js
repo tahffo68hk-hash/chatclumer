@@ -95,13 +95,17 @@ async function registryUrl() {
 async function refreshRegistry(force) {
   const url = await registryUrl();
   const { registryStatus } = await chrome.storage.local.get(["registryStatus"]);
+  const extension = chrome.runtime.getManifest().version;
+  const bundledNow = await loadBundledRegistry();
+  const stamp = { extension, bundled: bundledNow.version };
   if (!url) {
-    const status = { checked_at: new Date().toISOString(), ok: false, detail: "远端更新已关闭，只用内置注册表" };
+    const status = { ...stamp, checked_at: new Date().toISOString(), ok: false, detail: `远端更新已关闭，只用内置注册表 ${bundledNow.version}` };
     await chrome.storage.local.set({ registryStatus: status, registryRemote: null });
     return status;
   }
-  if (!force && registryStatus && Date.now() - Date.parse(registryStatus.checked_at || 0) < REGISTRY_EVERY_MS) return registryStatus;
-  const status = { checked_at: new Date().toISOString(), url, ok: false, detail: "" };
+  const ctx = { ...stamp, url, everyMs: REGISTRY_EVERY_MS };
+  if (!force && ChatclumerRegistrySchema.registryCacheFresh(registryStatus, ctx)) return registryStatus;
+  const status = { ...stamp, checked_at: new Date().toISOString(), url, ok: false, detail: "" };
   try {
     if (!/^https:\/\//.test(url)) throw new Error("只接受 https 地址");
     const controller = new AbortController();
@@ -127,8 +131,11 @@ async function refreshRegistry(force) {
     status.detail = `已缓存远端注册表 ${data.version}（内置 ${bundled.version}）`;
     await chrome.storage.local.set({ registryStatus: status, registryRemote: { data, url, fetched_at: status.checked_at } });
   } catch (err) {
-    status.detail = `没有更新：${err && err.message ? err.message : err}。继续用之前的缓存或内置注册表`;
-    await chrome.storage.local.set({ registryStatus: status });
+    status.detail = `没有更新：${err && err.message ? err.message : err}。继续用之前的缓存或内置注册表 ${stamp.bundled}`;
+    // 缓存的远端若不比现在的内置新，就丢掉，免得弹窗和页面拿旧缓存比较。
+    const { registryRemote } = await chrome.storage.local.get(["registryRemote"]);
+    const keep = registryRemote && registryRemote.data && ChatclumerRegistrySchema.compareVersion(registryRemote.data.version, stamp.bundled) > 0;
+    await chrome.storage.local.set(keep ? { registryStatus: status } : { registryStatus: status, registryRemote: null });
   }
   return status;
 }
@@ -321,6 +328,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     });
     return true;
   }
+  if (message?.type === "registry-status") {
+    // 弹窗打开时要：缓存过时（扩展或内置注册表变了、地址变了、超过间隔）就重新检查，否则直接给缓存。
+    refreshRegistry(false).then(sendResponse, () => sendResponse(null));
+    return true;
+  }
   if (message?.type === "registry-refresh") {
     refreshRegistry(true).then(sendResponse);
     return true;
@@ -355,6 +367,11 @@ chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
   if (!inflight.has(tabId)) return;
   const url = info.url || (tab && tab.url) || "";
   if (info.url || info.status === "complete") resumeInflight(tabId, url);
+});
+
+// 扩展安装、更新或重载后，强制重新比较远端和新的内置注册表。
+chrome.runtime.onInstalled.addListener(() => {
+  refreshRegistry(true).catch(() => {});
 });
 
 chrome.storage.session.get(["seenIds"]).then(({ seenIds }) => {

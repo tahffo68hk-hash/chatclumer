@@ -97,7 +97,8 @@ LAN=1 bash scripts/start.sh
 | ChatGPT（游客） | 不可靠。游客额度用完后页面要求「Sign in to continue」，扩展写入前就识别并回报，不写入、不重试。 |
 | DeepSeek / 豆包（要先登录） | 实页发送和读回已通过。DeepSeek 要放在单独的可见窗口里，后台标签页可能不渲染消息列表。未登录不发送。豆包地区不可用只回报，不绕过。 |
 | 0.5.0 注册表版本 | 改成从注册表编译后，用同一批真实 DOM 测试回归过；实页结果见上一行。 |
-| 0.5.1 | 修了重复注入报错、DeepSeek 虚拟列表读回、Qwen 页面检查误报，智谱清言加了诊断信息。只有夹具和测试结果，**实页还没跑**。 |
+| 0.5.1 实页（2026-11-15） | Qwen 游客、文心（含第二轮转发）、DeepSeek（用户气泡已被虚拟列表移走）发送并读回，与页面一致；测试后没有再出现「已声明」报错。Z.ai 用户消息发出后页面显示「Verification required, please try again」，房间当时只回报通用超时。智谱清言仍失败：点到了外层 `div.enter.is-main-chat`。 |
+| 0.5.2 | 智谱清言改为直接点内层图标（注册表 `click_inner`），找不到才退回中心点命中；Z.ai 发出后出现人机验证时立即回报（注册表 `error_texts`）；弹窗的注册表状态不再显示过时的比较。只有夹具和测试结果，**实页还没跑**。 |
 | Kimi / Grok / Copilot / Hugging Face Chat | 2026-11-15 试过：要登录才有回复，不当成游客站。 |
 | 千问 qianwen.com（tongyi.com 跳转）/ 秘塔 metaso.cn | 首次发送出现滑块验证，不代做，未接入。 |
 | Perplexity | 游客回复只有「注册并重复您的请求」，没有实际用处，未接入。 |
@@ -157,7 +158,7 @@ docs/             站点记录、交接和截图
 cd backend && .venv/bin/pytest -q
 ```
 
-不装 Playwright 时，项目自带的 venv 跑出 **52 passed, 7 skipped**（跳过的都是浏览器测试）。浏览器测试是在另一个装了 Playwright 的环境里跑的：真实 DOM 回放、注册表页面检查、远端注册表的接受与拒绝、诊断快照打码等。
+不装 Playwright 时，项目自带的 venv 跑出 **54 passed, 7 skipped**（跳过的都是浏览器测试）。浏览器测试是在另一个装了 Playwright 的环境里跑的：真实 DOM 回放、注册表页面检查、远端注册表的接受与拒绝、诊断快照打码等。
 
 改了 `extension/adapters/registry.json` 之后，要重新生成内置副本：
 
@@ -200,7 +201,7 @@ backend/.venv/bin/python scripts/check_web_bind_ui.py
 
 ## 路线
 
-- **0.5.x：** 用 0.5.1 在实页上回归各站点（智谱清言、DeepSeek、Qwen 页面检查是重点）。远端注册表第一次真实更新的流程也要核对。
+- **0.5.x：** 用 0.5.2 在实页上回归智谱清言（点内层图标）和 Z.ai（人机验证回报），并核对弹窗的注册表状态。
 - **分发：** 一键安装脚本（`install.sh` / `install.ps1`）、带版本号的发布包，以及内嵌网页的桌面壳（参考 ChatALL、GodMode 的内置窗口，复用同一份注册表）。规格见 [`docs/COMPETITOR_APPROACHES.md`](docs/COMPETITOR_APPROACHES.md) 的交接一节。
 - **评测：** 用真实成员（本机 Ollama 免费）跑一遍 `backend/eval`，替换自带的模拟结果。
 - **站点：** 元宝游客输入仍要先登录。仍被挡住的站点只在可见页面可用之后再接，不换入口绕过。
