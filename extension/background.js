@@ -80,10 +80,21 @@ function finishJob(token, tabId, job, result) {
   report(token, job, result);
 }
 
+// 首条消息会换地址的站点。整页跳转后内容脚本重新加载，这里按任务号让新页面接着读，不会再点发送。
+const RESUME_PATHS = {
+  deepseek: /\/a\/chat\/s\//,
+  qwen: /\/c\//,
+  chatgpt: /\/(c|uc)\//,
+  wenxin: /\/search\//,
+  zai: /\/c\//,
+  zhipu: /chatglm\.cn\//,
+};
+
 function resumeInflight(tabId, url) {
   const job = inflight.get(tabId);
-  if (!job || job.site !== "deepseek" || reported.has(job.request_id) || job.resumeSent) return;
-  if (url && !String(url).includes("/a/chat/s/")) return;
+  const pattern = job && RESUME_PATHS[job.site];
+  if (!job || !pattern || reported.has(job.request_id) || job.resumeSent) return;
+  if (url && !pattern.test(String(url))) return;
   job.resumeSent = true;
   load().then(({ pairToken }) => {
     if (!pairToken) return;
@@ -122,10 +133,21 @@ function scriptId(origin) {
   return `room-${origin.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").slice(0, 60)}`;
 }
 
+const GUEST_ORIGINS = new Set([
+  "https://chat.qwen.ai",
+  "https://chatgpt.com",
+  "https://chat.openai.com",
+  "https://wenxin.baidu.com",
+  "https://yiyan.baidu.com",
+  "https://chatglm.cn",
+  "https://chat.z.ai",
+]);
+
 function scriptFiles(origin) {
   if (origin === "https://chat.deepseek.com") return ["deepseek.js", "content.js"];
   if (origin === "https://www.doubao.com") return ["doubao.js", "content.js"];
   if (origin === "https://yuanbao.tencent.com") return ["yuanbao.js", "content.js"];
+  if (GUEST_ORIGINS.has(origin)) return ["guest.js", "content.js"];
   return ["content.js"];
 }
 

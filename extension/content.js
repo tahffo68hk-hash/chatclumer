@@ -15,17 +15,28 @@ function siteFrom(url) {
   if (url.startsWith("https://chat.deepseek.com/")) return "deepseek";
   if (url.startsWith("https://www.doubao.com/")) return "doubao";
   if (url.startsWith("https://chatglm.cn/")) return "zhipu";
+  if (url.startsWith("https://chat.qwen.ai/")) return "qwen";
+  if (url.startsWith("https://chatgpt.com/") || url.startsWith("https://chat.openai.com/")) return "chatgpt";
+  if (url.startsWith("https://wenxin.baidu.com/") || url.startsWith("https://yiyan.baidu.com/")) return "wenxin";
+  if (url.startsWith("https://chat.z.ai/")) return "zai";
   return "";
 }
 
+const GUEST_SITE_IDS = ["qwen", "chatgpt", "wenxin", "zhipu", "zai"];
+
+function guestSite(site) {
+  return GUEST_SITE_IDS.includes(site) && typeof guestDispatchSend === "function";
+}
+
 function managedSite(site) {
-  return site === "yuanbao" || site === "deepseek" || site === "doubao";
+  return site === "yuanbao" || site === "deepseek" || site === "doubao" || guestSite(site);
 }
 
 function siteDispatch(site) {
   if (site === "yuanbao" && typeof yuanbaoDispatchSend === "function") return yuanbaoDispatchSend;
   if (site === "deepseek" && typeof deepseekDispatchSend === "function") return deepseekDispatchSend;
   if (site === "doubao" && typeof doubaoDispatchSend === "function") return doubaoDispatchSend;
+  if (guestSite(site)) return (root, prompt, timeoutMs, shouldAbort) => guestDispatchSend(site, root, prompt, timeoutMs, shouldAbort);
   return null;
 }
 
@@ -122,17 +133,36 @@ const adapters = {
     loginDetail: () => (typeof doubaoLoginDetail === "function" ? doubaoLoginDetail(document) : "页面停在登录或验证，没有点击发送"),
     stop: () => (typeof doubaoStop === "function" ? doubaoStop(document) : null),
   },
-  zhipu: {
-    composer: () => null,
-    send: () => null,
-    assistants: () => [],
-    text: () => "",
-    done: () => false,
+};
+
+// 游客站点共用 guest.js。每个站的选择器在 GUEST_SITES 里；没装 guest.js 时这些站一律不发送。
+function guestAdapter(site) {
+  const ready = () => typeof guestDispatchSend === "function";
+  return {
+    composer: () => (ready() ? guestComposer(site, document) : null),
+    send: () => (ready() ? guestSend(site, document) : null),
+    assistants: () => (ready() ? guestAssistants(site, document) : []),
+    text: (node) => (ready() ? guestText(site, node) : ""),
+    done: (node) => (ready() ? guestDone(site, node) : false),
     model: () => "",
     openNew: () => null,
-    refuse: "智谱公开回复的正文位置未验证，不会发送，也不会用整页文字代替回复。",
-  },
-};
+    onlyNew: true,
+    readCap: 90000,
+    stableMs: 2500,
+    fallbackStableMs: 6000,
+    staleMs: 15000,
+    streaming: (node) => (ready() ? guestStreaming(site, document, node) : null),
+    replyNode: (prompt) => (ready() ? guestNewReply(site, document, prompt) : null),
+    partial: (node) => (ready() ? guestPartial(site, node) : ""),
+    timeoutDetail: (beforeCount) => (ready() ? guestTimeoutNote(site, document, beforeCount) : "超时"),
+    login: () => ready() && !!guestGate(site, document),
+    loginDetail: () => (ready() && guestGate(site, document)) || "页面停在登录或验证，没有点击发送",
+    stop: () => (ready() ? guestStopTarget(site, document) : null),
+    refuse: ready() ? "" : "游客站点适配器没有装上，不会发送，也不会用整页文字代替回复。",
+  };
+}
+
+for (const site of GUEST_SITE_IDS) adapters[site] = guestAdapter(site);
 
 const sent = new Set(JSON.parse(sessionStorage.getItem("bridge-sent") || "[]"));
 let busy = false;
@@ -251,6 +281,7 @@ function clickSiteStop() {
     const el = adapter.stop();
     if (!el) return false;
     if (typeof doubaoPress === "function" && site === "doubao") doubaoPress(el);
+    else if (typeof guestPress === "function" && guestSite(site)) guestPress(el);
     else if (typeof deepseekPress === "function" && site === "deepseek") deepseekPress(el);
     else el.click();
     return true;
@@ -279,6 +310,10 @@ function releaseComposer(box) {
   const site = siteFrom(location.href);
   if (site === "deepseek" && typeof deepseekClearComposer === "function") {
     deepseekClearComposer((typeof deepseekComposer === "function" && deepseekComposer(document)) || box);
+    return;
+  }
+  if (guestSite(site)) {
+    guestClearComposer(guestComposer(site, document) || box);
     return;
   }
   if (site === "doubao" && typeof doubaoClearComposer === "function") {
@@ -394,7 +429,8 @@ async function runJob(job) {
       }
       if (!outcome.ok) {
         const detail = String(outcome.detail || "");
-        if (detail.includes("需要登录") || detail.includes("豆包当前网络地区不可用")) {
+        if (outcome.gate || detail.includes("需要登录") || detail.includes("豆包当前网络地区不可用")) {
+          clearIfUnsent(box, job.prompt);
           return { status: "login", detail: outcome.detail, page_url: pageUrl };
         }
         clearIfUnsent(box, job.prompt);

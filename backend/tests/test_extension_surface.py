@@ -52,6 +52,15 @@ def test_optional_hosts_do_not_get_a_static_content_script():
     remembered = popup.split("function rememberFields", 1)[1].split("}", 1)[0]
     assert "memberId" in remembered and "tabKey" in remembered
     assert "code" not in remembered
-    zhipu = content.split("zhipu:", 1)[1].split("};", 1)[0]
-    assert "正文位置未验证" in zhipu
-    assert "querySelector" not in zhipu or "composer: () => null" in zhipu
+    guest = (ROOT / "extension" / "guest.js").read_text()
+    for site in ("qwen", "chatgpt", "wenxin", "zhipu", "zai"):
+        assert f"{site}: {{" in guest
+    assert "document.body" not in guest
+    assert "已填入，未发送" in guest
+    assert "需要先在页面上完成确认" in guest
+    assert "guestDispatchSend" in content
+    assert "guest.js" in background
+    for origin in ("https://chat.qwen.ai", "https://chatgpt.com", "https://wenxin.baidu.com", "https://chatglm.cn", "https://chat.z.ai"):
+        assert f"{origin}/*" in manifest["optional_host_permissions"]
+        assert origin in popup
+    assert manifest["version"] == "0.4.0"

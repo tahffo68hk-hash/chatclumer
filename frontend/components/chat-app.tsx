@@ -120,11 +120,13 @@ const WEB_SITES = [
   { id: "fixture", label: "本地夹具", origin: "http://127.0.0.1:43124/fixture/chat" },
   { id: "gemini", label: "Gemini", origin: "https://gemini.google.com/app" },
   { id: "yuanbao", label: "腾讯元宝", origin: "https://yuanbao.tencent.com/chat/" },
-  { id: "zhipu", label: "智谱清言 chatglm.cn", origin: "https://chatglm.cn/" },
+  { id: "zhipu", label: "智谱清言 chatglm.cn（游客）", origin: "https://chatglm.cn/" },
+  { id: "wenxin", label: "文心 wenxin.baidu.com（游客）", origin: "https://wenxin.baidu.com/" },
+  { id: "zai", label: "Z.ai chat.z.ai（游客）", origin: "https://chat.z.ai/" },
   { id: "doubao", label: "豆包", origin: "https://www.doubao.com/chat/" },
-  { id: "qwen", label: "Qwen", origin: "https://chat.qwen.ai/" },
+  { id: "qwen", label: "Qwen（游客）", origin: "https://chat.qwen.ai/" },
   { id: "deepseek", label: "DeepSeek", origin: "https://chat.deepseek.com/" },
-  { id: "chatgpt", label: "ChatGPT", origin: "https://chatgpt.com/" },
+  { id: "chatgpt", label: "ChatGPT（游客）", origin: "https://chatgpt.com/" },
   { id: "claude", label: "Claude", origin: "https://claude.ai/" },
   { id: "grok", label: "Grok", origin: "https://grok.com/" },
 ];
@@ -1057,7 +1059,7 @@ export function ChatApp() {
             <Button size="sm" variant="secondary" data-testid="pair-code" onClick={() => void api.pairCode().then((item) => setPairCode(item.code)).catch((err) => setError(err.message))}>生成本机配对码</Button>
             <Button size="sm" variant="outline" onClick={() => { setSettingsOpen(false); setConnectOpen(true); }}>连接网页 AI</Button>
             {pairCode && <p data-testid="pair-code-value">配对码 {pairCode}。粘贴到扩展弹窗。令牌不会出现在这里或聊天记录里。五分钟内有效，用一次即失效。</p>}
-            <p className="text-xs text-[#6b6258]">手机可以打开群聊页面。网页发送要在开着扩展的这台电脑上完成。元宝游客输入已关闭，需先在该标签页登录一次。智谱游客可用，但扩展不自动点发送。DeepSeek 和豆包的适配器已按 2026-11-15 的页面结构接入，仍要先登录，实页发送还没有再核对。</p>
+            <p className="text-xs text-[#6b6258]">手机可以打开群聊页面。网页发送要在开着扩展的这台电脑上完成。不用登录就能聊的：Qwen、ChatGPT、文心、智谱清言、Z.ai（扩展 0.4.0 游客自动发送，实页还没有逐站再核对；Qwen 第一次会要你在页面上确认年龄）。要先登录一次的：元宝、DeepSeek、豆包。遇到登录、注册或滑块验证时扩展只回报，不替你点。</p>
           </div>
         </DialogContent>
       </Dialog>

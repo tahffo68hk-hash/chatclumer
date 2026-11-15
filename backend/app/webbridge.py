@@ -21,6 +21,8 @@ SITES = {
     "doubao": {"origins": ["https://www.doubao.com"], "label": "豆包网页"},
     "yuanbao": {"origins": ["https://yuanbao.tencent.com"], "label": "腾讯元宝网页"},
     "zhipu": {"origins": ["https://chatglm.cn"], "label": "智谱清言网页"},
+    "wenxin": {"origins": ["https://wenxin.baidu.com", "https://yiyan.baidu.com"], "label": "文心网页"},
+    "zai": {"origins": ["https://chat.z.ai"], "label": "Z.ai 网页"},
 }
 
 # The extension reads a Yuanbao reply for 90s after send. This wait is longer so that report wins.
@@ -32,10 +34,13 @@ SITE_STATUS = {
         "detail": "2026-11-15 01:30 CST（2026-11-14T17:30:36Z）https://gemini.google.com/app 游客，页面显示 Flash-Lite。扩展写回两条回复。另一成员是演示模型，不是第二个网页模型。",
     },
     "qwen": {
-        "state": "age_gate_stopped",
-        "detail": "2026-11-14 https://chat.qwen.ai/ 手动可见操作，不是扩展回路。输入框可见，页面有 Qwen3.7-Plus。点了一次 Send 后出现确认年龄，没有填写出生年，也没有点 Continue。没有读到回复。",
+        "state": "guest_adapter",
+        "detail": "2026-11-15 游客实页记录了 https://chat.qwen.ai/ 的结构，地址会到 /c/guest。扩展 0.4.0 接入游客自动发送，实页端到端还没有再核对。首次发送会弹年龄确认：扩展不点，回报「需要先在页面上完成确认」，你在页面上确认一次后再发。",
     },
-    "chatgpt": {"state": "BLOCKED", "detail": "本环境早前打开 https://chatgpt.com/ 停在挑战页。没有重试，没有绕过。"},
+    "chatgpt": {
+        "state": "guest_adapter",
+        "detail": "2026-11-15 游客实页可聊天（未登录版式，输入框 textarea#mobile-composer-prompt，地址到 /uc/<id>）。扩展 0.4.0 接入游客自动发送，实页端到端还没有再核对。出现登录、注册或验证弹窗时只回报，不绕过。",
+    },
     "claude": {"state": "BLOCKED", "detail": "本环境早前打开 https://claude.ai/ 得到 403。没有重试，没有绕过。"},
     "deepseek": {
         "state": "login_required",
@@ -51,8 +56,16 @@ SITE_STATUS = {
         "detail": "2026-11-15 登录后的自动发送，以及一轮 A/B 取答案 1，已核对。0.2.9 把转发压成一段再比较，待实页再核对。同一轮失败后不再转发。游客输入仍要先登录一次。",
     },
     "zhipu": {
-        "state": "guest_no_autosend",
-        "detail": "智谱游客页可以人工使用。扩展不自动点击发送，公开回复正文位置未验证，也不用整页文字代替。",
+        "state": "guest_adapter",
+        "detail": "2026-11-15 游客实页（访客_xxxxxx）记录了输入框、发送键和回复正文位置。扩展 0.4.0 改为游客自动发送，只读最终回答，不读思考过程。实页端到端还没有再核对。",
+    },
+    "wenxin": {
+        "state": "guest_adapter",
+        "detail": "2026-11-15 游客实页 https://wenxin.baidu.com/（yiyan.baidu.com 会跳到这里）可聊天，地址到 /search/<id>。扩展 0.4.0 接入游客自动发送，实页端到端还没有再核对。",
+    },
+    "zai": {
+        "state": "guest_adapter",
+        "detail": "2026-11-15 游客实页 https://chat.z.ai/（页头显示 Guest）可聊天，地址到 /c/<id>。扩展 0.4.0 接入游客自动发送，只读回答不读 Thought Process。实页端到端还没有再核对。",
     },
 }
 
