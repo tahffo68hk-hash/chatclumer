@@ -254,5 +254,8 @@ def test_guest_send_that_never_lands_reports_filled_not_sent_and_clears():
         browser.close()
     assert result["ok"] is False
     assert "已填入，未发送" in result["detail"]
+    assert "已点过一次发送（button#send-message-button" not in result["detail"]  # 标签只含标签名和类名
+    assert "已点过一次发送（button" in result["detail"]
+    assert PROMPT not in result["detail"]
     assert result["clicks"] == 1
     assert result["empty"] is True

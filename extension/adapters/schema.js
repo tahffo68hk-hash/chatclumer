@@ -6,7 +6,7 @@
   const MAX_STR = 400;
   const MAX_LIST = 12;
   const ROLE_KEYS = ["composer", "send", "stop", "users", "user_text", "assistants", "host", "body", "exclude", "done_near", "messages", "column"];
-  const FLAG_KEYS = { writer: ["native", "exec"], guard_other: "bool", wait_send_enabled: "bool", click_center: "bool", click_inner: "sel" };
+  const FLAG_KEYS = { writer: ["native", "exec"], guard_other: "bool", wait_send_enabled: "bool", click_center: "bool", click_inner: "sel", send_after_input: "bool" };
   const SITE_KEYS = ["engine", "label", "origins", "roles", "disabled", "stop_find", "flags", "placeholder_text", "streaming", "done", "conv_url", "gates"];
   const COMMON_KEYS = ["dialogs", "toasts", "captcha_boxes", "captcha", "login", "not_login"];
   const TOP_KEYS = ["schema", "schema_version", "version", "min_extension", "source", "common", "sites"];

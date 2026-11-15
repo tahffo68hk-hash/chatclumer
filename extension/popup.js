@@ -78,7 +78,7 @@ document.getElementById("bind").addEventListener("click", async () => {
     return;
   }
   chrome.runtime.sendMessage({ type: "save-binding", tab_key: tabKey, tabId: tab.id, origin }, () => {
-    const how = ready.how === "dynamic" ? "已为这个站点注册内容脚本。" : "这个站点使用清单里的内容脚本。";
+    const how = ready.how === "dynamic" ? "已为这个站点注册内容脚本。" : ready.how === "already" ? "内容脚本已在页面里，没有重复注入。" : "这个站点使用清单里的内容脚本。";
     document.getElementById("status").textContent = `已绑定 ${origin}。${how}房间要等扩展心跳后才显示已绑定标签页。`;
   });
 });
@@ -101,7 +101,7 @@ function describeHealth(h) {
   if (!h) return "页面没有回应";
   const lines = [`${h.label || h.site}：${h.ok ? "通过" : "有问题"}（注册表 ${h.registry?.version || "?"}，${h.registry?.source || ""}）`, h.detail || ""];
   for (const [role, r] of Object.entries(h.roles || {})) {
-    lines.push(`  ${role}: ${r.found ? `命中 ${r.found} 个（第 ${r.index + 1} 个选择器）` : "没找到"}`);
+    lines.push(`  ${role}: ${r.found ? `命中 ${r.found} 个（第 ${r.index + 1} 个选择器）` : r.deferred ? "输入文字后才出现，未检查（不算失败）" : "没找到"}`);
   }
   if (h.registry?.note) lines.push(h.registry.note);
   return lines.join("\n");

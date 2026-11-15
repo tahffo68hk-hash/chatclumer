@@ -277,7 +277,22 @@ async function ensureScript(origin, tabId) {
       },
     ]);
   }
-  if (tabId) await chrome.scripting.executeScript({ target: { tabId }, files });
+  if (tabId) {
+    // 已经注册过的站点，页面加载时脚本就在了；再 executeScript 会把同一批文件跑第二遍。先问一下，已装好就不再注入。
+    let loaded = false;
+    try {
+      const [probe] = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: (ver) => !!(globalThis.__chatclumerLoaded && globalThis.__chatclumerLoaded.content === ver && globalThis.ChatclumerAdapters && globalThis.ChatclumerAdapters.__version === ver),
+        args: [chrome.runtime.getManifest().version],
+      });
+      loaded = !!(probe && probe.result);
+    } catch {
+      loaded = false;
+    }
+    if (!loaded) await chrome.scripting.executeScript({ target: { tabId }, files });
+    return { ok: true, how: loaded ? "already" : "dynamic", id };
+  }
   return { ok: true, how: "dynamic", id };
 }
 

@@ -1,8 +1,26 @@
+// 同一页面会被重复注入（绑定标签页、页面检查都会走 executeScript）。整份放在守卫里：
+// 同一个活着的扩展实例已经装过就什么都不做——不重置进行中的任务，不重复挂监听，也不会再报「已声明」。
+// 扩展重载后旧实例失效（chrome.runtime.id 取不到），或扩展版本变了，才会重新装一遍。
+if ((function (key) {
+  var done = (globalThis.__chatclumerLoaded = globalThis.__chatclumerLoaded || {});
+  var alive = false;
+  var ver = "";
+  try {
+    alive = !!(chrome.runtime && chrome.runtime.id);
+    ver = (alive && chrome.runtime.getManifest && chrome.runtime.getManifest().version) || "";
+  } catch (e) {
+    alive = false;
+  }
+  // 记下装的是哪个版本：同版本、扩展还活着才跳过；升级后旧版本留下的标记不会挡住新代码。
+  if (alive && done[key] && done[key] === (ver || true)) return false;
+  done[key] = ver || true;
+  return true;
+})("guest")) {
 // 游客站点适配器：Qwen、ChatGPT、文心、智谱清言、Z.ai。
 // 0.5.0 起选择器和站点规则不在代码里，而在 adapters/registry.json（数据，带版本，可从远端更新）。
 // 这里把注册表编译成引擎用的规格：选择器列表按顺序回退，规则（has/self/closest/not/all/any）编译成判断函数。
 // 五个站的输入框都是普通 textarea，所以共用一套写入、单击、核对和读回逻辑。
-const GUEST_DOM_SOURCE = "结构取自 2026-11-15 实页 DOM 导出（dom-dumps），见 adapters/registry.json";
+var GUEST_DOM_SOURCE = "结构取自 2026-11-15 实页 DOM 导出（dom-dumps），见 adapters/registry.json";
 
 function guestRegistry() {
   return globalThis.ChatclumerAdapters || null;
@@ -98,7 +116,7 @@ function guestCompileSite(id, raw) {
   return spec;
 }
 
-const guestCompiled = new WeakMap();
+var guestCompiled = new WeakMap();
 
 function guestSpec(site) {
   const reg = guestRegistry();
@@ -119,7 +137,7 @@ function guestSpec(site) {
   return tryCompile(reg.site(site)) || tryCompile(bundledRaw);
 }
 
-const guestCommonCache = new WeakMap();
+var guestCommonCache = new WeakMap();
 
 // 门槛只在真正打开的弹窗、提示条和验证框里找，不扫回复正文，也不看页头的登录按钮或内嵌的「登录获得更好体验」横幅。
 function guestCommon() {
@@ -563,6 +581,13 @@ function guestConfirmed(site, root, prompt, before) {
   return "";
 }
 
+// 诊断用：只给标签名和前两个类名，不含任何文字。
+function guestNodeLabel(el) {
+  if (!el || !el.tagName) return "?";
+  const cls = typeof el.className === "string" ? el.className.trim().split(/\s+/).filter(Boolean).slice(0, 2) : [];
+  return el.tagName.toLowerCase() + cls.map((c) => "." + c).join("");
+}
+
 async function guestDispatchSend(site, root, prompt, timeoutMs, shouldAbort) {
   const deadline = Date.now() + (timeoutMs == null ? 10000 : timeoutMs);
   if (!guestSpec(site)) return { ok: false, detail: "没有这个站点的适配器", clicked: false };
@@ -580,6 +605,7 @@ async function guestDispatchSend(site, root, prompt, timeoutMs, shouldAbort) {
   }
   const before = guestSnapshot(site, root);
   let clicked = false;
+  let pressedOn = "";
   while (Date.now() < deadline) {
     const live = guestComposer(site, root);
     if (shouldAbort && shouldAbort()) {
@@ -595,7 +621,9 @@ async function guestDispatchSend(site, root, prompt, timeoutMs, shouldAbort) {
       const ready = !!(live && guestMatchState(live, prompt) === "match");
       const send = guestSendUsable(site, root);
       if (ready && send) {
-        guestPress(guestClickTarget(site, send));
+        const target = guestClickTarget(site, send);
+        pressedOn = guestNodeLabel(target);
+        guestPress(target);
         clicked = true;
       }
     } else {
@@ -617,7 +645,9 @@ async function guestDispatchSend(site, root, prompt, timeoutMs, shouldAbort) {
   const live = guestComposer(site, root);
   const note = live ? guestDiagnosis(live, prompt) : "输入框已不在";
   const matched = !!(live && guestMatchState(live, prompt) === "match");
-  const idle = !clicked && matched ? "发送键一直不可点。" : "";
+  const idle = !clicked && matched
+    ? "发送键一直不可点。"
+    : clicked ? `已点过一次发送（${pressedOn}），期间页面上没有出现这条用户消息，不会再点。` : "";
   const detail = clicked || matched
     ? `已填入，未发送。${idle}${note}`
     : `输入框内容和待发文本不一致，没有点击发送。${note}`;
@@ -637,4 +667,10 @@ function guestTimeoutNote(site, root, beforeCount) {
 
 function guestStopTarget(site, root) {
   return guestStop(site, root);
+}
+
+// 块里的 async 函数不会自动成为全局函数，显式挂到全局，供其他内容脚本调用。
+globalThis.guestSettle = guestSettle;
+globalThis.guestCommitPrompt = guestCommitPrompt;
+globalThis.guestDispatchSend = guestDispatchSend;
 }

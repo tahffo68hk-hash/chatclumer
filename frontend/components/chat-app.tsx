@@ -141,6 +141,7 @@ function healthLine(health: NonNullable<Member["web_health"]>) {
   const version = health.registry_version ? ` · 注册表 ${health.registry_version}` : "";
   if (health.gate) return `页面检查：${health.gate}${version}`;
   if (!health.ok) return `页面检查：找不到${health.missing.map((r) => ROLE_LABELS[r] || r).join("、")}，适配器可能已失效${version}`;
+  if (health.deferred?.length) return `页面检查：输入框正常；发送键要输入后才出现，未检查${version}`;
   return `页面检查：输入框、发送键正常${version}`;
 }
 

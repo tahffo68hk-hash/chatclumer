@@ -139,6 +139,7 @@ export type WebHealth = {
   site: string;
   ok: boolean;
   missing: string[];
+  deferred?: string[];
   empty: string[];
   gate: string | null;
   detail: string;

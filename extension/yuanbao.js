@@ -1,7 +1,25 @@
+// 同一页面会被重复注入（绑定标签页、页面检查都会走 executeScript）。整份放在守卫里：
+// 同一个活着的扩展实例已经装过就什么都不做——不重置进行中的任务，不重复挂监听，也不会再报「已声明」。
+// 扩展重载后旧实例失效（chrome.runtime.id 取不到），或扩展版本变了，才会重新装一遍。
+if ((function (key) {
+  var done = (globalThis.__chatclumerLoaded = globalThis.__chatclumerLoaded || {});
+  var alive = false;
+  var ver = "";
+  try {
+    alive = !!(chrome.runtime && chrome.runtime.id);
+    ver = (alive && chrome.runtime.getManifest && chrome.runtime.getManifest().version) || "";
+  } catch (e) {
+    alive = false;
+  }
+  // 记下装的是哪个版本：同版本、扩展还活着才跳过；升级后旧版本留下的标记不会挡住新代码。
+  if (alive && done[key] && done[key] === (ver || true)) return false;
+  done[key] = ver || true;
+  return true;
+})("yuanbao")) {
 // 结构取自协调方实页 2026-11-15。本文件不是那次桌面验收，不能当成扩展端到端已通过。
-const YUANBAO_DOM_SOURCE = "结构取自协调方实页 2026-11-15";
+var YUANBAO_DOM_SOURCE = "结构取自协调方实页 2026-11-15";
 
-const YUANBAO_LOGIN_DETAIL = "元宝需要登录（游客输入已被关闭），请在该标签页登录一次后重试";
+var YUANBAO_LOGIN_DETAIL = "元宝需要登录（游客输入已被关闭），请在该标签页登录一次后重试";
 
 function yuanbaoVisible(el) {
   if (!el || el.hidden) return false;
@@ -424,4 +442,10 @@ function yuanbaoLogin(root) {
   const placeholder = composer ? composer.getAttribute("data-placeholder") || "" : "";
   if (/log ?in|登录/i.test(placeholder)) return true;
   return [...scope.querySelectorAll("#tcaptcha_iframe, .tcaptcha-transform, .geetest_panel")].some((el) => yuanbaoVisible(el));
+}
+
+// 块里的 async 函数不会自动成为全局函数，显式挂到全局，供其他内容脚本调用。
+globalThis.yuanbaoSettle = yuanbaoSettle;
+globalThis.yuanbaoCommitPrompt = yuanbaoCommitPrompt;
+globalThis.yuanbaoDispatchSend = yuanbaoDispatchSend;
 }

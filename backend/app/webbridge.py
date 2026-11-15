@@ -124,6 +124,7 @@ def clean_health(raw) -> dict | None:
         "ok": bool(raw.get("ok")),
         "missing": [text(x, 24) for x in (raw.get("missing") or []) if isinstance(x, str)][:8],
         "empty": [text(x, 24) for x in (raw.get("empty") or []) if isinstance(x, str)][:8],
+        "deferred": [text(x, 24) for x in (raw.get("deferred") or []) if isinstance(x, str) and x in HEALTH_ROLES][:8],
         "gate": text(raw.get("gate")) or None,
         "detail": text(raw.get("detail"), 300),
         "roles": roles,

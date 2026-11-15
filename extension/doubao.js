@@ -1,8 +1,26 @@
+// 同一页面会被重复注入（绑定标签页、页面检查都会走 executeScript）。整份放在守卫里：
+// 同一个活着的扩展实例已经装过就什么都不做——不重置进行中的任务，不重复挂监听，也不会再报「已声明」。
+// 扩展重载后旧实例失效（chrome.runtime.id 取不到），或扩展版本变了，才会重新装一遍。
+if ((function (key) {
+  var done = (globalThis.__chatclumerLoaded = globalThis.__chatclumerLoaded || {});
+  var alive = false;
+  var ver = "";
+  try {
+    alive = !!(chrome.runtime && chrome.runtime.id);
+    ver = (alive && chrome.runtime.getManifest && chrome.runtime.getManifest().version) || "";
+  } catch (e) {
+    alive = false;
+  }
+  // 记下装的是哪个版本：同版本、扩展还活着才跳过；升级后旧版本留下的标记不会挡住新代码。
+  if (alive && done[key] && done[key] === (ver || true)) return false;
+  done[key] = ver || true;
+  return true;
+})("doubao")) {
 // 结构取自协调方实页 2026-11-15。本文件不是那次桌面验收，不能当成扩展端到端已通过。
-const DOUBAO_DOM_SOURCE = "结构取自协调方实页 2026-11-15";
+var DOUBAO_DOM_SOURCE = "结构取自协调方实页 2026-11-15";
 
-const DOUBAO_LOGIN_DETAIL = "豆包需要登录，请在该标签页登录一次后重试";
-const DOUBAO_BAN_DETAIL = "豆包当前网络地区不可用";
+var DOUBAO_LOGIN_DETAIL = "豆包需要登录，请在该标签页登录一次后重试";
+var DOUBAO_BAN_DETAIL = "豆包当前网络地区不可用";
 
 function doubaoVisible(el) {
   if (!el || el.hidden || el.classList.contains("hidden")) return false;
@@ -346,4 +364,10 @@ function doubaoLogin(root) {
     if ((role === "dialog" || el.getAttribute("aria-modal") === "true") && (el.textContent || "").includes("使用豆包或飞书账号登录")) return true;
     return false;
   });
+}
+
+// 块里的 async 函数不会自动成为全局函数，显式挂到全局，供其他内容脚本调用。
+globalThis.doubaoSettle = doubaoSettle;
+globalThis.doubaoCommitPrompt = doubaoCommitPrompt;
+globalThis.doubaoDispatchSend = doubaoDispatchSend;
 }

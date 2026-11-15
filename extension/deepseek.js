@@ -1,7 +1,25 @@
+// 同一页面会被重复注入（绑定标签页、页面检查都会走 executeScript）。整份放在守卫里：
+// 同一个活着的扩展实例已经装过就什么都不做——不重置进行中的任务，不重复挂监听，也不会再报「已声明」。
+// 扩展重载后旧实例失效（chrome.runtime.id 取不到），或扩展版本变了，才会重新装一遍。
+if ((function (key) {
+  var done = (globalThis.__chatclumerLoaded = globalThis.__chatclumerLoaded || {});
+  var alive = false;
+  var ver = "";
+  try {
+    alive = !!(chrome.runtime && chrome.runtime.id);
+    ver = (alive && chrome.runtime.getManifest && chrome.runtime.getManifest().version) || "";
+  } catch (e) {
+    alive = false;
+  }
+  // 记下装的是哪个版本：同版本、扩展还活着才跳过；升级后旧版本留下的标记不会挡住新代码。
+  if (alive && done[key] && done[key] === (ver || true)) return false;
+  done[key] = ver || true;
+  return true;
+})("deepseek")) {
 // 结构取自协调方实页 2026-11-15。本文件不是那次桌面验收，不能当成扩展端到端已通过。
-const DEEPSEEK_DOM_SOURCE = "结构取自协调方实页 2026-11-15";
+var DEEPSEEK_DOM_SOURCE = "结构取自协调方实页 2026-11-15";
 
-const DEEPSEEK_LOGIN_DETAIL = "DeepSeek 需要登录，请在该标签页登录一次后重试";
+var DEEPSEEK_LOGIN_DETAIL = "DeepSeek 需要登录，请在该标签页登录一次后重试";
 
 function deepseekVisible(el) {
   if (!el || el.hidden) return false;
@@ -207,12 +225,14 @@ async function deepseekDispatchSend(root, prompt, timeoutMs, shouldAbort) {
     if (!clicked) {
       const send = deepseekSendUsable(root);
       if (ready && send) {
+        deepseekTrackBegin(root, prompt);
         deepseekPress(send);
         clicked = true;
       }
     } else if (deepseekConfirmed(root, prompt, startPath)) {
       const left = deepseekComposer(root);
       if (left && deepseekMatchState(left, prompt) === "match") deepseekClearComposer(left);
+      deepseekTrackSent(prompt);
       return { ok: true, clicked: true };
     }
     await new Promise((resolve) => setTimeout(resolve, 50));
@@ -250,7 +270,7 @@ function deepseekText(node) {
   return deepseekShown(clone.innerText || clone.textContent || "");
 }
 
-const DEEPSEEK_ACTION = "div[role='button'].ds-button--iconLabelTertiary";
+var DEEPSEEK_ACTION = "div[role='button'].ds-button--iconLabelTertiary";
 
 function deepseekHoldsMessage(el) {
   return !!(el && (el.matches(".ds-message") || el.querySelector(".ds-message")));
@@ -304,6 +324,39 @@ function deepseekStopTarget(root) {
   return send;
 }
 
+// 本次任务的发送前快照。DeepSeek 的消息列表是虚拟化的：回复变长后，上面的用户气泡会被移出 DOM，
+// 只靠「相符用户消息之后的助手消息」会一直找不到回复。快照在点击前一刻拍下，只在确认发出后启用。
+var deepseekTask = null;
+
+function deepseekTrackBegin(root, prompt) {
+  const known = deepseekAssistants(root);
+  deepseekTask = {
+    prompt: String(prompt || ""),
+    known: new WeakSet(known),
+    texts: new Set(known.map((node) => deepseekText(node)).filter(Boolean)),
+    sent: false,
+  };
+}
+
+function deepseekTrackSent(prompt) {
+  if (deepseekTask && deepseekTask.prompt === String(prompt || "")) deepseekTask.sent = true;
+}
+
+// 用户气泡已被虚拟化移走时的退路，条件全部满足才认：
+// 本任务已确认发出；是列表里最后一条消息且是助手消息；点击前不在页面上；
+// 文字和点击前任何一条助手回复都不相同（旧会话整列重挂载时，旧回复会以新节点出现——这样不会被当成新回复）。
+function deepseekTrackedReply(root, prompt) {
+  const task = deepseekTask;
+  if (!task || !task.sent || task.prompt !== String(prompt || "")) return null;
+  const messages = [...root.querySelectorAll(".ds-message")];
+  const tail = messages[messages.length - 1];
+  if (!tail || !tail.querySelector(".ds-assistant-message-main-content")) return null;
+  if (task.known.has(tail)) return null;
+  const text = deepseekText(tail);
+  if (text && task.texts.has(text)) return null;
+  return tail;
+}
+
 function deepseekNewReply(root, prompt) {
   const messages = [...root.querySelectorAll(".ds-message")];
   const users = new Set(deepseekUsers(root));
@@ -314,12 +367,19 @@ function deepseekNewReply(root, prompt) {
       break;
     }
   }
-  if (mine < 0) return null;
+  if (mine < 0) return deepseekTrackedReply(root, prompt);
   for (let i = mine + 1; i < messages.length; i += 1) {
     if (users.has(messages[i])) break;
-    if (messages[i].querySelector(".ds-assistant-message-main-content")) return messages[i];
+    if (messages[i].querySelector(".ds-assistant-message-main-content")) {
+      // 本任务已确认发出时，点击前就在页面上的助手消息一律不认（相同问题的旧问答还在页面上时会走到这里）。
+      const task = deepseekTask;
+      if (task && task.sent && task.prompt === String(prompt || "") && task.known.has(messages[i])) {
+        return deepseekTrackedReply(root, prompt);
+      }
+      return messages[i];
+    }
   }
-  return null;
+  return deepseekTrackedReply(root, prompt);
 }
 
 function deepseekPartial(node) {
@@ -353,4 +413,10 @@ function deepseekLogin(root) {
     const hint = `${el.getAttribute("placeholder") || ""} ${el.getAttribute("name") || ""} ${el.getAttribute("aria-label") || ""} ${el.type || ""}`;
     return /phone number|email address|password|手机|邮箱|密码/i.test(hint);
   });
+}
+
+// 块里的 async 函数不会自动成为全局函数，显式挂到全局，供其他内容脚本调用。
+globalThis.deepseekSettle = deepseekSettle;
+globalThis.deepseekCommitPrompt = deepseekCommitPrompt;
+globalThis.deepseekDispatchSend = deepseekDispatchSend;
 }
