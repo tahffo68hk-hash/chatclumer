@@ -1,0 +1,76 @@
+# 推送版本 tag（例如 v0.5.0）时打包并挂到对应的 GitHub Release。
+# 普通提交不会发版。桌面壳的 electron-builder 只在手动触发并且勾选 build_desktop 时跑，失败不影响扩展和应用包。
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      build_desktop:
+        description: Also build the Electron prototype for Linux
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install backend test dependencies
+        run: python -m pip install -r backend/requirements.txt
+      - name: Run tests
+        run: python -m pytest backend/tests -q
+
+  package:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build release archives
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="$(python3 -c 'import json; print(json.load(open("extension/manifest.json"))["version"])')"
+          fi
+          python3 scripts/build_release.py --out dist --version "$VERSION"
+      - name: Attach archives to the GitHub Release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* \
+              --title "$GITHUB_REF_NAME" \
+              --notes "ChatClumer ${GITHUB_REF_NAME}。扩展 zip 解压后可在 chrome://extensions 加载。应用包解压后运行 scripts/install.sh 或 scripts/install.ps1。桌面壳是原型，尚未在真实网站上验证。"
+          fi
+
+  desktop:
+    if: github.event_name == 'workflow_dispatch' && inputs.build_desktop
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Build Linux packages
+        working-directory: desktop
+        run: |
+          npm ci
+          npx electron-builder --linux

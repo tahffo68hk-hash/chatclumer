@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>ChatClumer 尚未启动</title>
+  <style>
+    body { font: 16px/1.5 sans-serif; margin: 48px auto; max-width: 38rem; color: #1c1917; }
+    code { font-size: 0.95em; }
+  </style>
+</head>
+<body>
+  <h1>本机服务还没就绪</h1>
+  <p>桌面壳只打开已经在跑的应用，不自己管理后端和前端进程。</p>
+  <p>Linux / macOS：<code>bash scripts/install.sh</code></p>
+  <p>Windows：<code>powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install.ps1</code></p>
+  <p>已经装过的话，用 <code>bash scripts/start.sh</code> 或 <code>scripts\start.ps1</code>。</p>
+  <p>就绪之后，应用在 <a href="http://127.0.0.1:43123">http://127.0.0.1:43123</a>。然后用菜单「重新检查本机服务」。</p>
+  <p>这是原型。默认只监听 127.0.0.1。</p>
+</body>
+</html>
