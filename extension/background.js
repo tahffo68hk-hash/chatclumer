@@ -1,5 +1,19 @@
 const BACKEND = "http://127.0.0.1:43124";
 const seen = new Set();
+const inflight = new Map();
+const reported = new Set();
+
+// 互相跳转的源算同一个绑定：文心三个域名，ChatGPT 两个域名。
+const SAME_SITE = [
+  ["https://wenxin.baidu.com", "https://chat.baidu.com", "https://yiyan.baidu.com"],
+  ["https://chatgpt.com", "https://chat.openai.com"],
+];
+
+function sameSiteOrigin(a, b) {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  return SAME_SITE.some((group) => group.includes(a) && group.includes(b));
+}
 
 async function load() {
   return chrome.storage.local.get(["pairToken", "bindings"]);
@@ -46,7 +60,7 @@ async function poll() {
   for (const job of payload.jobs || []) {
     if (job.action !== "cancel" && seen.has(job.request_id)) continue;
     const binding = (bindings || {})[job.tab_key];
-    if (!binding || binding.origin !== job.origin) {
+    if (!binding || !sameSiteOrigin(binding.origin, job.origin)) {
       await remember(job.request_id);
       await report(pairToken, job, { status: "error", detail: "标签页绑定不匹配", page_url: job.origin + "/" });
       continue;
@@ -58,12 +72,52 @@ async function poll() {
       continue;
     }
     await remember(job.request_id);
+    inflight.set(binding.tabId, job);
     chrome.tabs.sendMessage(binding.tabId, { type: "run", job }, (result) => {
-      const body = result || { status: "error", detail: chrome.runtime.lastError?.message || "标签页没有响应" };
-      report(pairToken, job, body);
+      if (chrome.runtime.lastError || !result) return;
+      finishJob(pairToken, binding.tabId, job, result);
     });
   }
   await beat(pairToken, bindings);
+}
+
+function finishJob(token, tabId, job, result) {
+  if (!job || reported.has(job.request_id)) return;
+  if (result && result.detail === "这个标签页正在处理上一条") {
+    job.resumeSent = false;
+    return;
+  }
+  reported.add(job.request_id);
+  inflight.delete(tabId);
+  report(token, job, result);
+}
+
+// 首条消息会换地址的站点。整页跳转后内容脚本重新加载，这里按任务号让新页面接着读，不会再点发送。
+const RESUME_PATHS = {
+  deepseek: /\/a\/chat\/s\//,
+  qwen: /\/c\//,
+  chatgpt: /\/(c|uc)\//,
+  wenxin: /\/search\/|chat\.baidu\.com\//,
+  zai: /\/c\//,
+  zhipu: /chatglm\.cn\//,
+};
+
+function resumeInflight(tabId, url) {
+  const job = inflight.get(tabId);
+  const pattern = job && RESUME_PATHS[job.site];
+  if (!job || !pattern || reported.has(job.request_id) || job.resumeSent) return;
+  if (url && !pattern.test(String(url))) return;
+  job.resumeSent = true;
+  load().then(({ pairToken }) => {
+    if (!pairToken) return;
+    chrome.tabs.sendMessage(tabId, { type: "resume", job }, (result) => {
+      if (chrome.runtime.lastError || !result) {
+        job.resumeSent = false;
+        return;
+      }
+      finishJob(pairToken, tabId, job, result);
+    });
+  });
 }
 
 async function report(token, job, result) {
@@ -91,29 +145,59 @@ function scriptId(origin) {
   return `room-${origin.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").slice(0, 60)}`;
 }
 
+const GUEST_ORIGINS = new Set([
+  "https://chat.qwen.ai",
+  "https://chatgpt.com",
+  "https://chat.openai.com",
+  "https://wenxin.baidu.com",
+  "https://yiyan.baidu.com",
+  "https://chat.baidu.com",
+  "https://chatglm.cn",
+  "https://chat.z.ai",
+]);
+
+function scriptFiles(origin) {
+  if (origin === "https://chat.deepseek.com") return ["deepseek.js", "content.js"];
+  if (origin === "https://www.doubao.com") return ["doubao.js", "content.js"];
+  if (origin === "https://yuanbao.tencent.com") return ["yuanbao.js", "content.js"];
+  if (GUEST_ORIGINS.has(origin)) return ["guest.js", "content.js"];
+  return ["content.js"];
+}
+
 async function ensureScript(origin, tabId) {
   if (STATIC_ORIGINS.has(origin)) return { ok: true, how: "manifest" };
   const pattern = `${origin}/*`;
   const allowed = await chrome.permissions.contains({ origins: [pattern] });
   if (!allowed) return { ok: false, detail: "主机权限未授予，没有注册内容脚本" };
   const id = scriptId(origin);
+  const files = scriptFiles(origin);
   const existing = await chrome.scripting.getRegisteredContentScripts({ ids: [id] });
-  if (!existing.length) {
+  const current = existing[0];
+  const same = current && Array.isArray(current.js) && current.js.join(",") === files.join(",");
+  if (!same) {
+    if (current) await chrome.scripting.unregisterContentScripts({ ids: [id] });
     await chrome.scripting.registerContentScripts([
       {
         id,
         matches: [pattern],
-        js: ["yuanbao.js", "content.js"],
+        js: files,
         runAt: "document_idle",
         persistAcrossSessions: true,
       },
     ]);
   }
-  if (tabId) await chrome.scripting.executeScript({ target: { tabId }, files: ["yuanbao.js", "content.js"] });
+  if (tabId) await chrome.scripting.executeScript({ target: { tabId }, files });
   return { ok: true, how: "dynamic", id };
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === "task-alive" && message.job) {
+    const job = message.job;
+    for (const [tabId, active] of inflight.entries()) {
+      if (active.request_id === job.request_id) resumeInflight(tabId, "");
+    }
+    return;
+  }
   if (message?.type === "job-progress") {
     load().then(async ({ pairToken }) => {
       if (!pairToken) return;
@@ -140,6 +224,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
   return undefined;
+});
+
+chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
+  if (!inflight.has(tabId)) return;
+  const url = info.url || (tab && tab.url) || "";
+  if (info.url || info.status === "complete") resumeInflight(tabId, url);
 });
 
 chrome.storage.session.get(["seenIds"]).then(({ seenIds }) => {

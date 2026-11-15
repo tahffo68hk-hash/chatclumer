@@ -1,9 +1,13 @@
 {
   "manifest_version": 3,
   "name": "多模型群聊网页桥",
-  "version": "0.2.9",
+  "version": "0.4.3",
   "description": "在你授权的标签页里读写可见聊天，并只和本机 127.0.0.1 配对。",
-  "permissions": ["storage", "activeTab", "scripting"],
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting"
+  ],
   "host_permissions": [
     "http://127.0.0.1:43124/*",
     "https://gemini.google.com/*"
@@ -17,7 +21,11 @@
     "https://chat.deepseek.com/*",
     "https://yuanbao.tencent.com/*",
     "https://chatglm.cn/*",
-    "https://www.doubao.com/*"
+    "https://www.doubao.com/*",
+    "https://wenxin.baidu.com/*",
+    "https://yiyan.baidu.com/*",
+    "https://chat.baidu.com/*",
+    "https://chat.z.ai/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -28,8 +36,14 @@
   },
   "content_scripts": [
     {
-      "matches": ["http://127.0.0.1:43124/fixture/*", "https://gemini.google.com/*"],
-      "js": ["yuanbao.js", "content.js"],
+      "matches": [
+        "http://127.0.0.1:43124/fixture/*",
+        "https://gemini.google.com/*"
+      ],
+      "js": [
+        "yuanbao.js",
+        "content.js"
+      ],
       "run_at": "document_idle"
     }
   ]

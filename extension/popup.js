@@ -33,7 +33,7 @@ document.getElementById("pair").addEventListener("click", async () => {
 });
 
 const STATIC_ORIGINS = new Set(["http://127.0.0.1:43124", "https://gemini.google.com"]);
-const ALLOWED = ["http://127.0.0.1:43124", "https://gemini.google.com", "https://chat.qwen.ai", "https://chatgpt.com", "https://chat.openai.com", "https://claude.ai", "https://grok.com", "https://chat.deepseek.com", "https://yuanbao.tencent.com", "https://chatglm.cn", "https://www.doubao.com"];
+const ALLOWED = ["http://127.0.0.1:43124", "https://gemini.google.com", "https://chat.qwen.ai", "https://chatgpt.com", "https://chat.openai.com", "https://claude.ai", "https://grok.com", "https://chat.deepseek.com", "https://yuanbao.tencent.com", "https://chatglm.cn", "https://www.doubao.com", "https://wenxin.baidu.com", "https://yiyan.baidu.com", "https://chat.baidu.com", "https://chat.z.ai"];
 
 document.getElementById("bind").addEventListener("click", async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });

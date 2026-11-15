@@ -11,7 +11,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { RichText } from "@/components/rich-text";
-import { api, eventUrl } from "@/lib/api";
+import { api, eventUrl, reconnectDelay } from "@/lib/api";
 import type { CatalogItem, ChatMessage, HighlightCard, Member, RoomGroup, Session, SplitItem } from "@/lib/types";
 
 const MODES = [
@@ -120,11 +120,13 @@ const WEB_SITES = [
   { id: "fixture", label: "本地夹具", origin: "http://127.0.0.1:43124/fixture/chat" },
   { id: "gemini", label: "Gemini", origin: "https://gemini.google.com/app" },
   { id: "yuanbao", label: "腾讯元宝", origin: "https://yuanbao.tencent.com/chat/" },
-  { id: "zhipu", label: "智谱清言 chatglm.cn", origin: "https://chatglm.cn/" },
+  { id: "zhipu", label: "智谱清言 chatglm.cn（游客）", origin: "https://chatglm.cn/main/alltoolsdetail?lang=zh" },
+  { id: "wenxin", label: "文心 wenxin.baidu.com（游客）", origin: "https://wenxin.baidu.com/" },
+  { id: "zai", label: "Z.ai chat.z.ai（游客）", origin: "https://chat.z.ai/" },
   { id: "doubao", label: "豆包", origin: "https://www.doubao.com/chat/" },
-  { id: "qwen", label: "Qwen", origin: "https://chat.qwen.ai/" },
+  { id: "qwen", label: "Qwen（游客）", origin: "https://chat.qwen.ai/" },
   { id: "deepseek", label: "DeepSeek", origin: "https://chat.deepseek.com/" },
-  { id: "chatgpt", label: "ChatGPT", origin: "https://chatgpt.com/" },
+  { id: "chatgpt", label: "ChatGPT（游客）", origin: "https://chatgpt.com/" },
   { id: "claude", label: "Claude", origin: "https://claude.ai/" },
   { id: "grok", label: "Grok", origin: "https://grok.com/" },
 ];
@@ -210,6 +212,7 @@ export function ChatApp() {
   });
   const bottomRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
+  const memberEpoch = useRef(0);
 
   const loadList = useCallback(async () => {
     const rows = await api.sessions();
@@ -218,7 +221,9 @@ export function ChatApp() {
   }, []);
 
   const loadRoom = useCallback(async (id: string) => {
+    const epoch = memberEpoch.current;
     const [detail, msgs, saved] = await Promise.all([api.session(id), api.messages(id), api.highlights(id)]);
+    if (epoch !== memberEpoch.current) return;
     setSession(detail.session);
     setMembers(detail.members);
     setGroups(detail.groups || []);
@@ -271,32 +276,54 @@ export function ChatApp() {
 
   useEffect(() => {
     if (!currentId) return;
-    const source = new EventSource(eventUrl(currentId));
-    source.addEventListener("snapshot", (event) => {
-      const data = JSON.parse((event as MessageEvent).data);
-      setSession(data.session);
-      setMembers(data.members);
-      setMessages(data.messages);
-    });
-    source.addEventListener("session", (event) => {
-      const data = JSON.parse((event as MessageEvent).data);
-      setSession(data);
-      setSessions((rows) => rows.map((row) => (row.id === data.id ? { ...row, ...data } : row)));
-    });
-    source.addEventListener("message", (event) => {
-      const data = JSON.parse((event as MessageEvent).data) as ChatMessage;
-      setMessages((list) => upsert(list, data));
-    });
-    source.addEventListener("members", (event) => {
-      const data = JSON.parse((event as MessageEvent).data) as Member[];
-      if (Array.isArray(data)) setMembers(data);
-    });
-    source.onerror = () => {
-      setLink("down");
-      source.close();
+    // 断线后按 1s、2s、4s… 最多 15s 重连；连上后服务端先推一份 snapshot（整间房的状态），再补读一次房间，横幅随之消失。
+    let closed = false;
+    let attempt = 0;
+    let timer: number | undefined;
+    let source: EventSource | null = null;
+    const connect = () => {
+      if (closed) return;
+      const es = new EventSource(eventUrl(currentId));
+      source = es;
+      es.addEventListener("snapshot", (event) => {
+        const data = JSON.parse((event as MessageEvent).data);
+        setSession(data.session);
+        setMembers(data.members);
+        setMessages(data.messages);
+        if (attempt > 0) loadRoom(currentId).catch(() => undefined);
+        attempt = 0;
+        setLink("ok");
+      });
+      es.addEventListener("session", (event) => {
+        const data = JSON.parse((event as MessageEvent).data);
+        setSession(data);
+        setSessions((rows) => rows.map((row) => (row.id === data.id ? { ...row, ...data } : row)));
+      });
+      es.addEventListener("message", (event) => {
+        const data = JSON.parse((event as MessageEvent).data) as ChatMessage;
+        setMessages((list) => upsert(list, data));
+      });
+      es.addEventListener("members", (event) => {
+        const data = JSON.parse((event as MessageEvent).data) as Member[];
+        if (Array.isArray(data)) setMembers(data);
+      });
+      es.onerror = () => {
+        es.close();
+        if (closed || source !== es) return;
+        setLink("down");
+        const delay = reconnectDelay(attempt);
+        attempt += 1;
+        window.clearTimeout(timer);
+        timer = window.setTimeout(connect, delay);
+      };
     };
-    return () => source.close();
-  }, [currentId]);
+    connect();
+    return () => {
+      closed = true;
+      window.clearTimeout(timer);
+      source?.close();
+    };
+  }, [currentId, loadRoom]);
 
   const sessionRef = useRef(session);
   sessionRef.current = session;
@@ -305,8 +332,9 @@ export function ChatApp() {
     if (!currentId) return;
     let stop = false;
     const refreshMembers = () => {
+      const epoch = memberEpoch.current;
       api.session(currentId).then((detail) => {
-        if (!stop) setMembers(detail.members);
+        if (!stop && epoch === memberEpoch.current) setMembers(detail.members);
       }).catch(() => undefined);
     };
     refreshMembers();
@@ -503,8 +531,17 @@ export function ChatApp() {
   }
 
   async function toggleMember(member: Member, enabled: boolean) {
-    await api.patchMember(member.id, { ...member, api_base: member.api_base || null, api_key_env: member.api_key_env || null, enabled });
-    if (currentId) await loadRoom(currentId);
+    const epoch = ++memberEpoch.current;
+    setMembers((list) => list.map((item) => (item.id === member.id ? { ...item, enabled } : item)));
+    try {
+      await api.patchMember(member.id, { enabled });
+      if (currentId && epoch === memberEpoch.current) await loadRoom(currentId);
+    } catch (err) {
+      if (epoch === memberEpoch.current) {
+        setMembers((list) => list.map((item) => (item.id === member.id ? { ...item, enabled: member.enabled } : item)));
+        setError(err instanceof Error ? err.message : "成员开关没有保存");
+      }
+    }
   }
 
   async function removeMember(member: Member) {
@@ -735,7 +772,7 @@ export function ChatApp() {
             )}
             {link === "down" && (
               <p data-testid="link-down" className="mx-auto mb-3 max-w-3xl rounded-lg bg-[#fff1df] px-3 py-2 text-sm text-[#9a3412]">
-                和本机后端的连接断了。重新读取不会再次发送上一条。
+                和本机后端的连接断了，正在自动重连。重新读取不会再次发送上一条。
                 <Button className="ml-2" size="sm" variant="outline" data-testid="reload-room" onClick={() => currentId && loadRoom(currentId).then(() => setLink("ok")).catch((err) => setError(err.message))}>重新读取</Button>
               </p>
             )}
@@ -1044,7 +1081,7 @@ export function ChatApp() {
             <Button size="sm" variant="secondary" data-testid="pair-code" onClick={() => void api.pairCode().then((item) => setPairCode(item.code)).catch((err) => setError(err.message))}>生成本机配对码</Button>
             <Button size="sm" variant="outline" onClick={() => { setSettingsOpen(false); setConnectOpen(true); }}>连接网页 AI</Button>
             {pairCode && <p data-testid="pair-code-value">配对码 {pairCode}。粘贴到扩展弹窗。令牌不会出现在这里或聊天记录里。五分钟内有效，用一次即失效。</p>}
-            <p className="text-xs text-[#6b6258]">手机可以打开群聊页面。网页发送要在开着扩展的这台电脑上完成。元宝游客输入已关闭，需先在该标签页登录一次。智谱游客可用，但扩展不自动点发送。DeepSeek 和豆包需要登录。</p>
+            <p className="text-xs text-[#6b6258]">手机可以打开群聊页面。网页发送要在开着扩展的这台电脑上完成。不用登录就能聊的：Qwen、ChatGPT、文心、智谱清言、Z.ai（扩展 0.4.0 游客自动发送，实页还没有逐站再核对；Qwen 第一次会要你在页面上确认年龄）。要先登录一次的：元宝、DeepSeek、豆包。遇到登录、注册或滑块验证时扩展只回报，不替你点。</p>
           </div>
         </DialogContent>
       </Dialog>

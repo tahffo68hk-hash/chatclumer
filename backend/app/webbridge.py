@@ -21,6 +21,8 @@ SITES = {
     "doubao": {"origins": ["https://www.doubao.com"], "label": "豆包网页"},
     "yuanbao": {"origins": ["https://yuanbao.tencent.com"], "label": "腾讯元宝网页"},
     "zhipu": {"origins": ["https://chatglm.cn"], "label": "智谱清言网页"},
+    "wenxin": {"origins": ["https://chat.baidu.com", "https://wenxin.baidu.com", "https://yiyan.baidu.com"], "label": "文心网页"},
+    "zai": {"origins": ["https://chat.z.ai"], "label": "Z.ai 网页"},
 }
 
 # The extension reads a Yuanbao reply for 90s after send. This wait is longer so that report wins.
@@ -32,24 +34,38 @@ SITE_STATUS = {
         "detail": "2026-11-15 01:30 CST（2026-11-14T17:30:36Z）https://gemini.google.com/app 游客，页面显示 Flash-Lite。扩展写回两条回复。另一成员是演示模型，不是第二个网页模型。",
     },
     "qwen": {
-        "state": "age_gate_stopped",
-        "detail": "2026-11-14 https://chat.qwen.ai/ 手动可见操作，不是扩展回路。输入框可见，页面有 Qwen3.7-Plus。点了一次 Send 后出现确认年龄，没有填写出生年，也没有点 Continue。没有读到回复。",
+        "state": "guest_verified_live",
+        "detail": "2026-11-15 扩展 0.4.2 实页端到端已通过（发送、读回、转发）。若服务端提示没有权限，回报「千问游客发送被拒绝，可能需要登录」，清空输入框，不重发。年龄确认弹窗只回报，不点。",
     },
-    "chatgpt": {"state": "BLOCKED", "detail": "本环境早前打开 https://chatgpt.com/ 停在挑战页。没有重试，没有绕过。"},
+    "chatgpt": {
+        "state": "guest_gated",
+        "detail": "2026-11-15 实页：游客额度用完后页面出现「Sign in to continue」，扩展 0.4.3 在写入前识别并回报「ChatGPT 需要登录后才能继续（游客额度可能用完）」，不写入、不重试。ChatGPT 游客模式不可靠。",
+    },
     "claude": {"state": "BLOCKED", "detail": "本环境早前打开 https://claude.ai/ 得到 403。没有重试，没有绕过。"},
-    "deepseek": {"state": "BLOCKED", "detail": "DeepSeek 需要登录后的标签页。本环境早前打开 https://chat.deepseek.com/ 得到 CloudFront 403。没有重试，没有绕过。"},
+    "deepseek": {
+        "state": "login_verified_live",
+        "detail": "2026-11-15 扩展 0.4.2 在已登录、单独可见窗口的标签页里实页端到端已通过。标签页在后台时虚拟消息列表可能不渲染。停在 /sign_in 或出现登录输入框时不发送。",
+    },
     "grok": {"state": "login_wall", "detail": "本环境早前打开 https://grok.com/ 先是登录与 Cookie 说明，没有当成游客聊天。"},
     "doubao": {
-        "state": "UNVERIFIED",
-        "detail": "豆包需要登录后才有回复。本机还没有核验输入框，不会发送。",
+        "state": "login_verified_live",
+        "detail": "2026-11-15 已登录实页发送和读回已通过（较早版本核对）。出现登录框时不发送。地区不可用页只回报「豆包当前网络地区不可用」，不绕过。",
     },
     "yuanbao": {
         "state": "guest_login_required",
         "detail": "2026-11-15 登录后的自动发送，以及一轮 A/B 取答案 1，已核对。0.2.9 把转发压成一段再比较，待实页再核对。同一轮失败后不再转发。游客输入仍要先登录一次。",
     },
     "zhipu": {
-        "state": "guest_no_autosend",
-        "detail": "智谱游客页可以人工使用。扩展不自动点击发送，公开回复正文位置未验证，也不用整页文字代替。",
+        "state": "guest_adapter",
+        "detail": "2026-11-15 0.4.2 实页报「已填入，未发送」（站点没认到写入，发送键一直带 .empty）。扩展 0.4.3 改用 execCommand('insertText') 写入、等发送键可点、点按钮中心元素；实页待再核对。只读最终回答，不读思考过程。",
+    },
+    "wenxin": {
+        "state": "guest_adapter",
+        "detail": "2026-11-15 0.4.2 实页报「已填入，未发送」。扩展 0.4.3 改用 execCommand('insertText') 写入、点发送图标 img#ci-submit-button-ai；若页面发出的不是待发文本（例如示例提示）就停下报错。实页待再核对。wenxin.baidu.com / chat.baidu.com / yiyan.baidu.com 算同一个绑定。",
+    },
+    "zai": {
+        "state": "guest_verified_live",
+        "detail": "2026-11-15 扩展 0.4.2 游客实页端到端已通过，地址到 /c/<id>，只读回答不读 Thought Process。",
     },
 }
 
@@ -63,6 +79,17 @@ def origin_of(url: str) -> str:
     if not parsed.scheme or not parsed.netloc:
         return ""
     return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def same_site_origin(a: str, b: str) -> bool:
+    """Two origins count as the same tab binding when they are equal or belong to the same site
+    (wenxin.baidu.com / chat.baidu.com / yiyan.baidu.com redirect into each other; chatgpt.com / chat.openai.com)."""
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    site = site_for_origin(a)
+    return site is not None and site == site_for_origin(b)
 
 
 def site_for_origin(origin: str) -> str | None:
@@ -150,7 +177,7 @@ class WebBridge:
                     continue
                 alive = bool(beat.get("alive"))
                 for row in rows:
-                    if (row["web_tab_key"] or "") != key or (row["web_origin"] or "") != origin:
+                    if (row["web_tab_key"] or "") != key or not same_site_origin(row["web_origin"] or "", origin):
                         continue
                     if alive:
                         self.db.conn.execute(
@@ -355,7 +382,7 @@ class WebBridge:
             self._wake(request_id)
             return {"ok": True, "duplicate": False, "accepted": False, "reason": "stale_context"}
         origin = origin_of(body.get("page_url") or "")
-        if origin != job["origin"]:
+        if not same_site_origin(origin, job["origin"]):
             return {"ok": False, "error": "origin"}
         if job["status"] in {"complete", "discarded", "error"}:
             return {"ok": True, "duplicate": True, "accepted": False}

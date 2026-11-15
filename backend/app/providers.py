@@ -6,7 +6,6 @@ import asyncio
 import contextlib
 import json
 import os
-import unicodedata
 from dataclasses import dataclass, field
 from typing import AsyncIterator
 from urllib.parse import urlparse
@@ -145,8 +144,11 @@ def render_prompt(req: GenRequest) -> str:
 
 
 def flat_forward(text: str, limit: int = 800) -> str:
-    """One paragraph for a web composer. Quill splits on newlines."""
-    flat = unicodedata.normalize("NFKC", text or "")
+    """One paragraph for a web composer. Quill splits on newlines.
+
+    Punctuation stays as typed. Comparison, not this string, folds width.
+    """
+    flat = text or ""
     for mark in ("\u200b", "\u200c", "\u200d", "\ufeff"):
         flat = flat.replace(mark, "")
     flat = " ".join(flat.replace("\u00a0", " ").split())
