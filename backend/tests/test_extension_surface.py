@@ -63,6 +63,6 @@ def test_optional_hosts_do_not_get_a_static_content_script():
     for origin in ("https://chat.qwen.ai", "https://chatgpt.com", "https://wenxin.baidu.com", "https://chat.baidu.com", "https://chatglm.cn", "https://chat.z.ai"):
         assert f"{origin}/*" in manifest["optional_host_permissions"]
         assert origin in popup
-    assert manifest["version"] == "0.4.3"
+    assert manifest["version"] == "0.4.4"
     assert 'url.startsWith("https://chat.baidu.com/")) return "wenxin"' in content
     assert '"https://chat.baidu.com",' in background
