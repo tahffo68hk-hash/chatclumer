@@ -43,16 +43,22 @@
 | 早前，本轮没有重试 | https://grok.com/ | 登录与 Cookie 说明 | 未能核验 | 没有当成游客聊天 | 登录墙 |
 | 2026-11-15 | https://www.doubao.com/chat/ | 已登录 | 未把页面模式名当成精确模型 | 0.3.0 第一轮发出并读回。第三轮转发没有写进编辑器 | 0.3.1 重新聚焦后再试插入、粘贴和 beforeinput。读回保留全角标点。转发仍待实页再核对 |
 
-### 支持的网页 AI（扩展 0.4.0，2026-11-15）
+### 支持的网页 AI（扩展 0.4.2，2026-11-15）
 
-| 站点 | 需要登录吗 | 扩展状态 | 主要选择器 |
+0.4.1 实页测试时，ChatGPT、文心、智谱、Z.ai 都报「已填入，未发送」，Qwen 被误判成登录墙。0.4.2 的选择器改为从实页 DOM 导出（`/workspace/dom-dumps`，已整理成 `backend/tests/fixtures/real_dom/`，DeepSeek 只留聊天栏，没有侧栏历史和账号名）里取，并用这些真实 DOM 做测试（`backend/tests/test_real_dom.py`）：点一次发送后换入同站的真实「生成中」「完成」DOM 和地址，检查发送确认、读回和完成判定。没有站点自己的脚本，所以仍不等于实页端到端。
+
+0.4.1 的问题：ChatGPT 点到了听写按钮（`lightweight-composer-send` 图标在听写键上），真正的发送键是 `button[data-composer-submit]`；Z.ai 的 Tailwind 类名 `disabled:bg-…-disabled` 被当成禁用；智谱的助手消息是 `.answer[id^=row-answer-]`，不是 `.conversation.answer`；文心、智谱发出后扩展看到的输入框仍有原文，而旧的发送确认要求输入框先清空；Qwen 的门槛检测范围太宽。
+
+发送确认（10 秒内任一条成立）：出现文字相符的新用户消息（NFKC 规范化后比较站点的用户消息正文）；地址换成该站的会话地址；或点击后输入框被清空且出现新的助手消息。确认后输入框若还留着原文，会清掉，免得之后被误发。门槛只看真正打开的弹窗、提示条和验证框：ChatGPT 页面里藏着未打开的「Log in or sign up」`<dialog>`，对话下方的「Log in for a more personalized…」横幅也不算登录墙。
+
+| 站点 | 需要登录吗 | 0.4.2 选择器（来自实页 DOM） | 把握 |
 | --- | --- | --- | --- |
-| Qwen https://chat.qwen.ai/ | 游客（/c/guest） | 0.4.0 自动发送，夹具通过，实页待核对。年龄确认弹窗不点，回报「需要先在页面上完成确认」 | `textarea.message-input-textarea`；发送 `button.send-button[aria-label=Send]`（`disabled`）；停止 `button.stop-button`；回复 `.qwen-chat-message-assistant .response-message-content.phase-answer`；完成 `.response-message-footer button[aria-label=Copy]` |
-| ChatGPT https://chatgpt.com/ | 游客（未登录版式，/uc/<id>） | 同上 | `textarea#mobile-composer-prompt`；发送：图标 `use[href*=lightweight-composer-send]` 所在按钮；停止：`composer-stop` 图标；回复 `li[data-message-role=assistant] [data-assistant-markdown-root]`；完成 `data-message-complete` 且无 `aria-busy=true` |
-| 文心 https://chat.baidu.com/（wenxin.baidu.com、yiyan.baidu.com 现都跳到这里；0.4.1 起三个源都认） | 游客（wenxin 时期地址到 /search/<id>） | 同上。选择器取自 wenxin.baidu.com 时期的页面，chat.baidu.com 上待实页核对 | `textarea#chat-textarea`；发送 `span.ci-submit-button`（可用时内含 `.ci-submit-button-ai-active`）；回复 `.ai-entry-block.ai-markdown .cosd-markdown-content`（「正在思考」视为空）；完成 `.chat-qa-container [data-testid=menu-btn-copy]` |
-| 智谱清言 https://chatglm.cn/ | 游客（访客_xxxxxx） | 0.4.0 起自动发送（以前只允许人工），同上 | `.input-box-inner textarea`；发送 `div.enter.is-main-chat`；回复 `.conversation.answer .answer-content-wrap .markdown-body`，排除 `.text-advance-thinking-content`；完成 `.conversation-item .interact-container .copy` |
-| Z.ai https://chat.z.ai/ | 游客（页头 Guest，/c/<id>） | 同上 | `textarea#chat-input`；发送 `button#send-message-button`（`disabled`；空框却可点视为停止键）；回复 `.chat-assistant .chat-markdown`，排除 `.thinking-chain-container`；完成 `button[aria-label=Copy]` / `Regenerate` |
-| 元宝 / DeepSeek / 豆包 | 要先在该标签页登录一次 | 元宝、豆包实页已通过；DeepSeek 0.3.2 修了完成判定，待实页再核对 | 见 `yuanbao.js`、`deepseek.js`、`doubao.js` |
+| Qwen https://chat.qwen.ai/ | 游客发送当前被服务端拒绝 | 输入 `textarea.message-input-textarea`；发送 `button.send-button[aria-label=Send]`；停止 `button.stop-button[aria-label=Stop]`；用户 `.qwen-chat-message-user p.user-message-content`；助手 `.qwen-chat-message-assistant`（生成中 `.response-loading`）；提示条「You do not have permission to access this resource」→ 回报「千问游客发送被拒绝，可能需要登录」并清空输入框；年龄确认仍只回报 | 输入、发送、停止、消息结构有实页 DOM；回复正文 `.response-message-content.phase-answer` 和完成标记没见过真实回复，不确定 |
+| ChatGPT https://chatgpt.com/ | 游客（/ → /uc/<id>） | 输入 `textarea#mobile-composer-prompt`；发送 `button[data-composer-submit]`（`aria-label` 变成 Stop generating 时是停止）；用户 `li[data-message-role=user] [data-user-message-copy]`；助手 `li[data-message-role=assistant] [data-assistant-markdown-root]`；完成 `data-message-complete` 且无 `aria-busy=true` | 有实页 DOM；生成中的停止状态没抓到（回复太快） |
+| 文心 https://wenxin.baidu.com/（chat.baidu.com、yiyan.baidu.com 会跳到这里，三个源算同一个绑定） | 游客（/search/<id>） | 输入 `textarea#chat-textarea`；发送 `span.ci-submit-button`（内有 `img#ci-submit-button-ai`）；停止 `img.ci-submit-pause`；用户 `.cs-question-bubble .cs-question-pure-text`；助手 `.conversation-flow-answer-container .ai-entry-block.ai-markdown .cosd-markdown-content`；生成/完成 `.chat-qa-container[data-chat-status=GENERATING/COMPLETE]` | 有实页 DOM，状态属性明确 |
+| 智谱清言 https://chatglm.cn/main/alltoolsdetail?lang=zh | 游客（地址加 `&cid=`） | 输入 `#search-input-box textarea`；发送 `div.enter.is-main-chat`（生成中加 `.searching`，就是停止键）；用户 `.conversation.question .question-txt`；助手 `.answer[id^=row-answer-]`，正文 `.answer-content-wrap .markdown-body`，排除 `.text-advance-thinking-content`；生成中 `.answer-loading`；完成 `.interact-container .copy/.regenerate` | 有实页 DOM |
+| Z.ai https://chat.z.ai/ | 游客（/c/<uuid>） | 输入 `textarea#chat-input`；发送 `button#send-message-button`；停止 `button[aria-label=Stop][data-slot=button]`；用户 `.user-message [data-user-bubble]`；助手 `.chat-assistant`（外框 `div[id^=message-]`），正文 `.chat-markdown`，排除 `.thinking-chain-container`；生成中 `._common-loading`；完成 `button[aria-label=Copy/Regenerate]` | 有实页 DOM |
+| 元宝 / DeepSeek / 豆包 | 要先在该标签页登录一次 | 元宝、豆包实页已通过。DeepSeek 的选择器在实页 DOM 上全部命中（用户、助手、正文、完成标记、发送键状态），0.4.1 实页「超时。AI 0→0」不是选择器问题，较可能是标签页在后台时 DeepSeek 的虚拟消息列表不渲染；0.4.2 的超时说明会写出标签页是否在后台，请把 DeepSeek 放在单独的可见窗口里 | 见 `yuanbao.js`、`deepseek.js`、`doubao.js` |
 | Gemini | 游客 | 扩展回路通过（见上表） | 见 `content.js` |
 | Kimi、Grok、Copilot、Hugging Face Chat | 要登录 | 不接入游客模式 | — |
 | 千问 qianwen.com（tongyi.com）、秘塔 metaso.cn | 首次发送弹滑块验证 | 不代做验证，不接入 | — |

@@ -211,6 +211,8 @@ async function deepseekDispatchSend(root, prompt, timeoutMs, shouldAbort) {
         clicked = true;
       }
     } else if (deepseekConfirmed(root, prompt, startPath)) {
+      const left = deepseekComposer(root);
+      if (left && deepseekMatchState(left, prompt) === "match") deepseekClearComposer(left);
       return { ok: true, clicked: true };
     }
     await new Promise((resolve) => setTimeout(resolve, 50));
@@ -231,7 +233,8 @@ function deepseekConfirmed(root, prompt, startPath) {
   const path = ((root.defaultView && root.defaultView.location) || location).pathname || "";
   const moved = path.includes("/a/chat/s/") && path !== startPath;
   const found = deepseekUsers(root).some((node) => deepseekUserMatches(node, prompt));
-  return cleared && (moved || found);
+  // 新的相符用户消息出现就算发出；换到会话地址也算，但要输入框已清空，避免把别的跳转当成发送。
+  return found || (cleared && moved);
 }
 
 function deepseekShown(value) {
@@ -330,7 +333,12 @@ function deepseekTimeoutNote(root, beforeCount) {
   const send = deepseekSend(root);
   const klass = send ? [...send.classList].join(" ").slice(0, 80) : "";
   const streaming = deepseekStreaming(root);
-  return `超时。AI ${beforeCount}→${items.length}，生成中 ${streaming === null ? "未知" : streaming ? "是" : "否"}，发送 class ${klass}`;
+  const doc = root.ownerDocument || root;
+  const hidden = doc.visibilityState === "hidden" || doc.hidden === true;
+  const where = hidden
+    ? "，标签页在后台：DeepSeek 的消息列表是虚拟列表，后台时可能不渲染，请把 DeepSeek 放在单独的、可见的窗口里"
+    : "";
+  return `超时。AI ${beforeCount}→${items.length}，生成中 ${streaming === null ? "未知" : streaming ? "是" : "否"}${where}，发送 class ${klass}`;
 }
 
 function deepseekLoginDetail() {

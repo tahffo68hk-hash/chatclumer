@@ -1,6 +1,7 @@
-"""Guest-site adapters (extension/guest.js) against fixtures shaped like the 2026-11-15 guest DOM capture.
+"""Generic guest.js behaviour (walls, unsent-and-cleared) on small hand-made pages.
 
-These are fixtures, not the live sites. A pass here does not mean the real page passed end to end.
+Per-site selectors are tested against the real DOM in test_real_dom.py; these pages only exercise the
+gate and send-check logic.
 """
 
 import pytest
@@ -183,25 +184,6 @@ DRIVER = """async ([site, spec, prompt, words]) => {
     source: GUEST_DOM_SOURCE,
   };
 }"""
-
-
-@pytest.mark.parametrize("site", list(SITES))
-def test_guest_site_sends_once_and_reads_the_answer(site):
-    spec = SITES[site]
-    with sync_playwright() as playwright:
-        browser, page = _open(playwright, spec)
-        result = page.evaluate(DRIVER, [spec.get("site", site), spec, PROMPT, WORDS])
-        browser.close()
-    assert result["status"] == "complete", result
-    assert result["text"] == "我是一个AI 助手，很高兴认识你。"
-    assert "可能未完整" not in result["text"]
-    assert "不要收" not in result["text"]
-    assert result["sends"] == 1
-    assert result["writes"] == 1
-    assert result["extra"] == 0
-    assert result["empty"] is True
-    assert result["elapsed"] < 6000  # done marker path, not the 6 s fallback
-    assert result["source"] == "结构取自协调方游客实页 2026-11-15"
 
 
 def test_qwen_age_confirm_is_reported_not_clicked():

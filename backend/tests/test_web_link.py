@@ -204,3 +204,29 @@ def test_unbound_tab_does_not_send_and_progress_replaces_the_waiting_line(tmp_pa
     assert noted.status_code == 200
     diagnosed = app.state.db.get_message(message["id"])
     assert diagnosed["content"] == "已填入，未发送。待发长度 16，实际长度 32，重复"
+
+
+def test_wenxin_origins_bind_as_one_site(tmp_path):
+    from app.webbridge import same_site_origin
+
+    assert same_site_origin("https://wenxin.baidu.com", "https://chat.baidu.com")
+    assert same_site_origin("https://chat.baidu.com", "https://yiyan.baidu.com")
+    assert same_site_origin("https://chatgpt.com", "https://chat.openai.com")
+    assert not same_site_origin("https://wenxin.baidu.com", "https://chatglm.cn")
+    assert not same_site_origin("https://chat.deepseek.com", "")
+    app = create_app(str(tmp_path / "room.db"), str(tmp_path / "secrets.json"))
+    client = TestClient(app)
+    created = client.post("/api/sessions", json={"title": "文心", "max_rounds": 3, "max_seconds": 30}).json()
+    body = _web_body(nickname="文心网页", origin="https://wenxin.baidu.com/", key="wenxin-key")
+    body.update({"web_site": "wenxin", "model_id": "web:wenxin"})
+    saved = client.post(f"/api/sessions/{created['id']}/members/web", json=body)
+    assert saved.status_code == 200, saved.text
+    code = client.post("/api/ext/code").json()["code"]
+    token = client.post("/api/ext/pair", json={"code": code}).json()["token"]
+    beat = client.post(
+        "/api/ext/tabs",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"tabs": [{"tab_key": "wenxin-key", "origin": "https://chat.baidu.com", "alive": True}]},
+    )
+    assert beat.status_code == 200
+    assert beat.json()["updated"] == 1

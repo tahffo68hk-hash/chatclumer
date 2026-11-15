@@ -1,84 +1,117 @@
 // 游客站点适配器：Qwen、ChatGPT、文心、智谱清言、Z.ai。
 // 结构取自协调方游客实页 2026-11-15（见 docs/WEB_ACCESS.md）。本文件不是那次桌面验收，不能当成扩展端到端已通过。
 // 五个站的输入框都是普通 textarea，所以共用一套写入、单击、核对和读回逻辑，只是选择器不同。
-const GUEST_DOM_SOURCE = "结构取自协调方游客实页 2026-11-15";
+const GUEST_DOM_SOURCE = "结构取自 2026-11-15 实页 DOM 导出（dom-dumps）";
 
-const GUEST_CAPTCHA = /drag the slider|slide to verify|向右滑动|拖动滑块|滑动完成验证|verify you are human|人机验证|安全验证|captcha/i;
-const GUEST_LOGIN = /log ?in|sign ?up|sign ?in|登录|注册/i;
-const GUEST_MODALS = "[role='dialog'], [aria-modal='true'], [class*='modal' i], [class*='dialog' i], [class*='captcha' i], [id*='captcha' i]";
+// 门槛只在真正打开的弹窗、提示条和验证框里找，不扫回复正文，也不看页头的登录按钮或内嵌的「登录获得更好体验」横幅。
+const GUEST_DIALOGS = "[role='dialog'], [aria-modal='true'], dialog[open], .ant-modal";
+const GUEST_TOASTS = "[role='alert'], [role='status'], .ant-message, .ant-notification, [class*='toast' i], [class*='notice' i]";
+const GUEST_CAPTCHA_BOXES = "[class*='captcha' i], [id*='captcha' i], [id^='nc_'], [class*='nc-container'], [class*='verify' i]";
+const GUEST_CAPTCHA = /drag the slider|slide to verify|向右滑动|拖动滑块|滑动完成验证|verify you are human|人机验证|安全验证/i;
+const GUEST_LOGIN = /log in or sign up|sign up to continue|log in to continue|sign in to continue|登录后(继续|即可|使用)|请先登录|登录以继续|扫码登录|手机号登录|验证码登录|使用.{0,8}账号登录/i;
+const GUEST_NOT_LOGIN = /personali[sz]ed|clear current chat/i;
 
 const GUEST_SITES = {
   qwen: {
     label: "Qwen",
     composer: "textarea.message-input-textarea, textarea[placeholder='Ask Qwen']",
-    send: "button.send-button[aria-label='Send'], .chat-prompt-send-button button.send-button",
-    stop: "button.stop-button, button[aria-label='Stop'][data-aes-exp='expInputStop']",
+    send: "button.send-button[aria-label='Send']",
+    stop: "button.stop-button[aria-label='Stop'], button[data-aes-exp='expInputStop']",
     users: ".qwen-chat-message-user",
+    userText: "p.user-message-content",
     assistants: ".qwen-chat-message-assistant",
-    body: ".response-message-content.phase-answer",
+    body: ".response-message-content.phase-answer, .response-message-content .qwen-markdown",
     exclude: "[class*='thinking']",
+    streamingIn: (node) => (node.querySelector(".response-loading") ? true : null),
     doneNear: ".response-message-footer button[aria-label='Copy'], button[class*='action-control-container-copy']",
-    gates: [{ test: /confirm your age|确认.{0,6}年龄|年龄确认/i, detail: "需要先在页面上完成确认（Qwen 年龄确认），扩展不会替你点" }],
+    convUrl: /\/c\/(?!new-chat)[\w-]{8,}/,
+    gates: [
+      { test: /do not have permission to access this resource|没有权限访问/i, where: "toast", detail: "千问游客发送被拒绝，可能需要登录（页面提示没有权限）。扩展没有重发" },
+      { test: /confirm your age|确认.{0,6}年龄|年龄确认/i, where: "dialog", detail: "需要先在页面上完成确认（Qwen 年龄确认），扩展不会替你点" },
+    ],
   },
   chatgpt: {
     label: "ChatGPT",
-    composer: "textarea#mobile-composer-prompt, textarea[name='prompt'][data-mobile-composer-prompt], #prompt-textarea",
-    sendFind: (root) => {
-      const icon = [...root.querySelectorAll("button use")].find((use) => /lightweight-composer-send|composer-send/.test(use.getAttribute("href") || use.getAttribute("xlink:href") || ""));
-      if (icon) return icon.closest("button");
-      return root.querySelector("button[data-testid='send-button']")
-        || [...root.querySelectorAll("[data-composer-layout] button[data-variant='primary']")].find((el) => !el.hasAttribute("data-send-dictation"))
-        || null;
-    },
+    composer: "textarea#mobile-composer-prompt, textarea[name='prompt'][data-mobile-composer-prompt]",
+    send: "button[data-composer-submit]",
+    // 同一个按钮在生成时换成停止（data-stop-label="Stop generating"）。
     stopFind: (root) => {
-      const icon = [...root.querySelectorAll("button use")].find((use) => /composer-stop/.test(use.getAttribute("href") || use.getAttribute("xlink:href") || ""));
-      return (icon && icon.closest("button")) || root.querySelector("button[data-testid='stop-button'], button[aria-label='Stop streaming']");
+      const el = root.querySelector("button[data-composer-submit]");
+      if (el && /stop/i.test(el.getAttribute("aria-label") || "")) return el;
+      return root.querySelector("button[data-testid='stop-button'], button[aria-label='Stop generating']");
     },
-    users: "li[data-message-role='user'], [data-message-author-role='user']",
-    assistants: "li[data-message-role='assistant'], [data-message-author-role='assistant']",
-    body: "[data-assistant-markdown-root], .markdown",
+    users: "li[data-message-role='user']",
+    userText: "[data-user-message-copy]",
+    assistants: "li[data-message-role='assistant']",
+    body: "[data-assistant-markdown-root]",
     streamingIn: (node) => {
       if (node.querySelector("[aria-busy='true']")) return true;
       if (node.hasAttribute("data-message-complete")) return false;
       return null;
     },
     doneIn: (node) => node.hasAttribute("data-message-complete") && !node.querySelector("[aria-busy='true']"),
+    convUrl: /\/(c|uc)\/[\w-]{8,}/,
   },
   wenxin: {
     label: "文心",
-    composer: "textarea#chat-textarea, #ci-area textarea.ci-textarea",
+    composer: "textarea#chat-textarea",
     send: "span.ci-submit-button",
-    disabled: (el) => !el.querySelector(".ci-submit-button-ai-active"),
+    disabled: (el) => !el.querySelector("img#ci-submit-button-ai"),
+    stopFind: (root) => {
+      const icon = root.querySelector("span.ci-submit-button img.ci-submit-pause");
+      return icon ? icon.closest("span.ci-submit-button") : null;
+    },
     users: ".cs-question-bubble",
-    assistants: ".ai-entry-block.ai-markdown",
-    body: ".cosd-markdown-content, .marklang",
+    userText: ".cs-question-pure-text",
+    assistants: ".conversation-flow-answer-container",
+    body: ".ai-entry-block.ai-markdown .cosd-markdown-content, .ai-entry-block.ai-markdown .marklang",
     placeholderText: /^正在思考/,
-    scope: ".chat-qa-container",
-    doneNear: "[data-testid='menu-btn-copy']",
+    streamingIn: (node) => {
+      const pair = node.closest(".chat-qa-container[data-chat-status]");
+      const status = pair ? pair.getAttribute("data-chat-status") : "";
+      if (status === "GENERATING") return true;
+      if (status === "COMPLETE") return false;
+      return null;
+    },
+    doneIn: (node) => {
+      const pair = node.closest(".chat-qa-container[data-chat-status]");
+      return !!pair && pair.getAttribute("data-chat-status") === "COMPLETE";
+    },
+    convUrl: /\/search\/\d+/,
   },
   zhipu: {
     label: "智谱清言",
-    composer: ".input-box-inner textarea, .input-wrap textarea",
-    send: "div.enter.is-main-chat, .input-box div.enter",
+    composer: "#search-input-box textarea, .input-box-inner textarea",
+    send: "#search-input-box div.enter.is-main-chat, div.enter.is-main-chat",
+    disabled: (el) => el.classList.contains("searching") || !!el.querySelector(".enter-icon-container.empty"),
+    stopFind: (root) => root.querySelector("div.enter.is-main-chat.searching"),
     users: ".conversation.question",
-    assistants: ".conversation.answer",
+    userText: ".question-txt",
+    assistants: ".answer[id^='row-answer-']",
     body: ".answer-content-wrap .markdown-body",
     exclude: ".text-advance-thinking-content, .advance-thinking",
-    scope: ".conversation-item",
-    doneNear: ".interact-container .copy, .interact-container .regenerate",
+    streamingIn: (node) => {
+      if (node.querySelector(".answer-loading")) return true;
+      if (node.querySelector(".interact-container .copy, .interact-container .regenerate")) return false;
+      return null;
+    },
+    doneIn: (node) => !node.querySelector(".answer-loading") && !!node.querySelector(".interact-container .copy, .interact-container .regenerate"),
+    convUrl: /[?&]cid=/,
   },
   zai: {
     label: "Z.ai",
-    composer: "textarea#chat-input, textarea[placeholder='Send a Message']",
-    send: "button#send-message-button, button[aria-label='Send Message']",
-    stop: "button[aria-label='Stop'], button[aria-label='Stop generating']",
-    emptyEnabledIsStop: true,
+    composer: "textarea#chat-input",
+    send: "button#send-message-button",
+    stop: "button[aria-label='Stop'][data-slot='button']",
     users: ".user-message",
+    userText: "[data-user-bubble]",
     assistants: ".chat-assistant",
     host: "div[id^='message-']",
     body: ".chat-markdown",
     exclude: ".thinking-chain-container",
+    streamingIn: (node) => (node.querySelector("._common-loading") ? true : null),
     doneNear: "button[aria-label='Copy'], button[aria-label='Regenerate']",
+    convUrl: /\/c\/[\w-]{8,}/,
   },
 };
 
@@ -153,7 +186,8 @@ function guestDisabled(site, el) {
   if (spec && spec.disabled && spec.disabled(el)) return true;
   if (el.disabled || el.hasAttribute("disabled")) return true;
   if (el.getAttribute("aria-disabled") === "true" || el.getAttribute("data-disabled") === "true") return true;
-  return [...el.classList].some((name) => /(^|-)disabled?$|^is-disabled$/i.test(name));
+  // Tailwind 的 disabled:xxx / aria-disabled:xxx 只是样式变体，不代表当前禁用。
+  return [...el.classList].some((name) => !name.includes(":") && /(^|-)disabled?$|^is-disabled$/i.test(name));
 }
 
 function guestSendUsable(site, root) {
@@ -232,20 +266,25 @@ async function guestCommitPrompt(site, root, prompt, shouldAbort) {
   }
 }
 
-// 页面上的门槛：站点自己的确认框、人机验证、登录或注册卡片。只看弹窗类容器和标题，不扫回复正文。
+// 页面上的门槛：站点自己的提示（Qwen 无权限提示、年龄确认）、人机验证、登录或注册弹窗。
 function guestGate(site, root) {
   const spec = guestSpec(site);
   if (!spec) return null;
-  const containers = [...root.querySelectorAll(`${GUEST_MODALS}, h1, h2, h3`)].filter((el) => guestVisible(el));
-  const texts = containers.map((el) => (el.innerText || el.textContent || "").slice(0, 600));
+  const read = (selector) => [...root.querySelectorAll(selector)]
+    .filter((el) => guestVisible(el) && !(el.tagName === "DIALOG" && !el.open))
+    .map((el) => (el.innerText || el.textContent || "").slice(0, 800));
+  const dialogs = read(GUEST_DIALOGS);
+  const toasts = read(GUEST_TOASTS);
+  const heads = read("h1, h2, h3");
   for (const gate of spec.gates || []) {
-    if (texts.some((text) => gate.test.test(text))) return gate.detail;
+    const pool = gate.where === "toast" ? toasts.concat(dialogs) : dialogs.concat(heads);
+    if (pool.some((text) => gate.test.test(text))) return gate.detail;
   }
-  const modalTexts = containers.filter((el) => el.matches(GUEST_MODALS)).map((el) => (el.innerText || el.textContent || "").slice(0, 600));
-  if (modalTexts.some((text) => GUEST_CAPTCHA.test(text))) return `${spec.label} 出现人机验证，需要你在页面上完成后再试，扩展不会代做`;
-  if (modalTexts.some((text) => GUEST_LOGIN.test(text))) return `${spec.label} 需要登录，请在该标签页登录一次后重试`;
+  const captcha = dialogs.concat(read(GUEST_CAPTCHA_BOXES));
+  if (captcha.some((text) => GUEST_CAPTCHA.test(text))) return `${spec.label} 出现人机验证，需要你在页面上完成后再试，扩展不会代做`;
+  if (dialogs.some((text) => GUEST_LOGIN.test(text) && !GUEST_NOT_LOGIN.test(text))) return `${spec.label} 需要登录，请在该标签页登录一次后重试`;
   const loc = (root && root.defaultView && root.defaultView.location) || (typeof location !== "undefined" ? location : null);
-  if (loc && /\/auth\/|\/login|\/sign_?in/i.test(loc.pathname || "")) return `${spec.label} 需要登录，请在该标签页登录一次后重试`;
+  if (loc && /^\/(auth|login|sign_?in)(\/|$)/i.test(loc.pathname || "")) return `${spec.label} 需要登录，请在该标签页登录一次后重试`;
   return null;
 }
 
@@ -264,9 +303,17 @@ function guestAssistants(site, root) {
   return spec ? [...root.querySelectorAll(spec.assistants)].map((el) => guestHost(site, el)) : [];
 }
 
-function guestUserMatches(node, prompt) {
+function guestUserText(site, node) {
+  const spec = guestSpec(site);
+  const part = spec && spec.userText ? node.querySelector(spec.userText) : null;
+  const el = part || node;
+  return guestNormalize(el.innerText || el.textContent || "");
+}
+
+function guestUserMatches(node, prompt, site) {
   const expected = guestNormalize(prompt).slice(0, 40);
   if (!expected) return false;
+  if (site && guestUserText(site, node).includes(expected)) return true;
   return guestNormalize(node.innerText || node.textContent || "").includes(expected);
 }
 
@@ -278,7 +325,7 @@ function guestNewReply(site, root, prompt) {
   const isUser = (el) => el.matches(spec.users);
   let mine = -1;
   for (let i = all.length - 1; i >= 0; i -= 1) {
-    if (isUser(all[i]) && guestUserMatches(all[i], prompt)) {
+    if (isUser(all[i]) && guestUserMatches(all[i], prompt, site)) {
       mine = i;
       break;
     }
@@ -353,18 +400,38 @@ function guestStreaming(site, root, node) {
   if (!send) return null;
   const composer = guestComposer(site, root);
   const empty = !composer || guestComposerText(composer) === "";
-  if (!empty) return null;
-  if (guestDisabled(site, send)) return spec.stop || spec.stopFind || spec.emptyEnabledIsStop ? false : null;
-  return spec.emptyEnabledIsStop ? true : null;
+  if (empty && guestDisabled(site, send) && (spec.stop || spec.stopFind)) return false;
+  return null;
 }
 
-function guestConfirmed(site, root, prompt, before, startPath) {
+function guestHref(root) {
+  const loc = (root.defaultView && root.defaultView.location) || location;
+  return String(loc.href || "");
+}
+
+function guestSnapshot(site, root) {
+  return {
+    users: new Set(guestUsers(site, root)),
+    assistants: new Set(guestAssistants(site, root)),
+    href: guestHref(root),
+  };
+}
+
+// 发出去了吗？下面任何一条成立就算：
+// 1. 出现了新的、文字与待发内容相符的用户消息（按 NFKC 规范化后比较）；
+// 2. 地址换成了这个站的会话地址；
+// 3. 点击后输入框被站点清空，并且出现了新的助手消息。
+function guestConfirmed(site, root, prompt, before) {
+  const spec = guestSpec(site);
+  const fresh = guestUsers(site, root).filter((node) => !before.users.has(node));
+  if (fresh.some((node) => guestUserMatches(node, prompt, site))) return "user";
+  const href = guestHref(root);
+  if (spec.convUrl && href !== before.href && spec.convUrl.test(href) && !spec.convUrl.test(before.href)) return "url";
   const live = guestComposer(site, root);
   const cleared = !live || guestComposerText(live) === "";
-  const users = guestUsers(site, root);
-  const found = users.length > before && users.slice(before).some((node) => guestUserMatches(node, prompt));
-  const path = ((root.defaultView && root.defaultView.location) || location).pathname || "";
-  return cleared && (found || path !== startPath);
+  const fresher = guestAssistants(site, root).some((node) => !before.assistants.has(node));
+  if (cleared && fresher) return "assistant";
+  return "";
 }
 
 async function guestDispatchSend(site, root, prompt, timeoutMs, shouldAbort) {
@@ -382,8 +449,7 @@ async function guestDispatchSend(site, root, prompt, timeoutMs, shouldAbort) {
       : `输入框内容和待发文本不一致，没有点击发送。${committed.detail}`;
     return { ok: false, detail, clicked: false };
   }
-  const before = guestUsers(site, root).length;
-  const startPath = ((root.defaultView && root.defaultView.location) || location).pathname || "";
+  const before = guestSnapshot(site, root);
   let clicked = false;
   while (Date.now() < deadline) {
     const live = guestComposer(site, root);
@@ -403,8 +469,14 @@ async function guestDispatchSend(site, root, prompt, timeoutMs, shouldAbort) {
         guestPress(send);
         clicked = true;
       }
-    } else if (guestConfirmed(site, root, prompt, before, startPath)) {
-      return { ok: true, clicked: true };
+    } else {
+      const how = guestConfirmed(site, root, prompt, before);
+      if (how) {
+        // 已经发出。站点若没清空输入框，这里清掉，免得之后被误发第二次。
+        const left = guestComposer(site, root);
+        if (left && guestMatchState(left, prompt) === "match") guestClearComposer(left);
+        return { ok: true, clicked: true, how };
+      }
     }
     await new Promise((resolve) => setTimeout(resolve, 50));
   }

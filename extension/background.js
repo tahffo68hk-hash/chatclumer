@@ -3,6 +3,18 @@ const seen = new Set();
 const inflight = new Map();
 const reported = new Set();
 
+// 互相跳转的源算同一个绑定：文心三个域名，ChatGPT 两个域名。
+const SAME_SITE = [
+  ["https://wenxin.baidu.com", "https://chat.baidu.com", "https://yiyan.baidu.com"],
+  ["https://chatgpt.com", "https://chat.openai.com"],
+];
+
+function sameSiteOrigin(a, b) {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  return SAME_SITE.some((group) => group.includes(a) && group.includes(b));
+}
+
 async function load() {
   return chrome.storage.local.get(["pairToken", "bindings"]);
 }
@@ -48,7 +60,7 @@ async function poll() {
   for (const job of payload.jobs || []) {
     if (job.action !== "cancel" && seen.has(job.request_id)) continue;
     const binding = (bindings || {})[job.tab_key];
-    if (!binding || binding.origin !== job.origin) {
+    if (!binding || !sameSiteOrigin(binding.origin, job.origin)) {
       await remember(job.request_id);
       await report(pairToken, job, { status: "error", detail: "标签页绑定不匹配", page_url: job.origin + "/" });
       continue;

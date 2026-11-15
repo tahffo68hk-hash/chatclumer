@@ -35,7 +35,7 @@ SITE_STATUS = {
     },
     "qwen": {
         "state": "guest_adapter",
-        "detail": "2026-11-15 游客实页记录了 https://chat.qwen.ai/ 的结构，地址会到 /c/guest。扩展 0.4.0 接入游客自动发送，实页端到端还没有再核对。首次发送会弹年龄确认：扩展不点，回报「需要先在页面上完成确认」，你在页面上确认一次后再发。",
+        "detail": "2026-11-15 实页：游客发送会被服务端拒绝（提示没有权限后退回首页）。扩展 0.4.2 识别这条提示并回报「千问游客发送被拒绝，可能需要登录」，清空输入框，不重发。年龄确认弹窗也只回报。",
     },
     "chatgpt": {
         "state": "guest_adapter",
@@ -61,7 +61,7 @@ SITE_STATUS = {
     },
     "wenxin": {
         "state": "guest_adapter",
-        "detail": "2026-11-15 游客实页 https://wenxin.baidu.com/（yiyan.baidu.com 会跳到这里）可聊天，地址到 /search/<id>。随后实页绑定时已跳到 https://chat.baidu.com，扩展 0.4.1 起三个源都认。扩展 0.4.0 接入游客自动发送，实页端到端还没有再核对。",
+        "detail": "2026-11-15 实页游客可聊天：https://wenxin.baidu.com/（chat.baidu.com、yiyan.baidu.com 会跳到这里，三个源算同一个绑定），发出后地址到 /search/<id>。扩展 0.4.2 的选择器取自实页 DOM，实页端到端待再核对。",
     },
     "zai": {
         "state": "guest_adapter",
@@ -79,6 +79,17 @@ def origin_of(url: str) -> str:
     if not parsed.scheme or not parsed.netloc:
         return ""
     return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def same_site_origin(a: str, b: str) -> bool:
+    """Two origins count as the same tab binding when they are equal or belong to the same site
+    (wenxin.baidu.com / chat.baidu.com / yiyan.baidu.com redirect into each other; chatgpt.com / chat.openai.com)."""
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    site = site_for_origin(a)
+    return site is not None and site == site_for_origin(b)
 
 
 def site_for_origin(origin: str) -> str | None:
@@ -166,7 +177,7 @@ class WebBridge:
                     continue
                 alive = bool(beat.get("alive"))
                 for row in rows:
-                    if (row["web_tab_key"] or "") != key or (row["web_origin"] or "") != origin:
+                    if (row["web_tab_key"] or "") != key or not same_site_origin(row["web_origin"] or "", origin):
                         continue
                     if alive:
                         self.db.conn.execute(
@@ -371,7 +382,7 @@ class WebBridge:
             self._wake(request_id)
             return {"ok": True, "duplicate": False, "accepted": False, "reason": "stale_context"}
         origin = origin_of(body.get("page_url") or "")
-        if origin != job["origin"]:
+        if not same_site_origin(origin, job["origin"]):
             return {"ok": False, "error": "origin"}
         if job["status"] in {"complete", "discarded", "error"}:
             return {"ok": True, "duplicate": True, "accepted": False}

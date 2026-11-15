@@ -193,11 +193,13 @@ function waitTick(ms) {
     let finished = false;
     let observer = null;
     let timer = null;
+    let onVisible = null;
     const finish = () => {
       if (finished) return;
       finished = true;
       clearTimeout(timer);
       if (observer) observer.disconnect();
+      if (onVisible) document.removeEventListener("visibilitychange", onVisible);
       resolve();
     };
     timer = setTimeout(finish, ms);
@@ -212,6 +214,10 @@ function waitTick(ms) {
           }
         });
         observer.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true });
+      }
+      if (typeof document.addEventListener === "function") {
+        onVisible = () => finish();
+        document.addEventListener("visibilitychange", onVisible);
       }
     } catch {
       /* 观察失败时只靠定时器 */
@@ -454,6 +460,10 @@ async function runJob(job) {
       posted = true;
     }
     const result = await waitNew(adapter, before, signal, job.prompt);
+    if (result.status === "login" && managedSite(site)) {
+      // 站点把发送退回、把原文放回输入框时（如 Qwen 无权限），清掉它，免得之后被误发。
+      clearIfUnsent(adapter.composer(), job.prompt);
+    }
     const timedOut = String(result.detail || "").startsWith("超时");
     if (result.status === "cancelled" || timedOut) {
       if (!posted) clearIfUnsent(box, job.prompt);
