@@ -91,25 +91,36 @@ function scriptId(origin) {
   return `room-${origin.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").slice(0, 60)}`;
 }
 
+function scriptFiles(origin) {
+  if (origin === "https://chat.deepseek.com") return ["deepseek.js", "content.js"];
+  if (origin === "https://www.doubao.com") return ["doubao.js", "content.js"];
+  if (origin === "https://yuanbao.tencent.com") return ["yuanbao.js", "content.js"];
+  return ["content.js"];
+}
+
 async function ensureScript(origin, tabId) {
   if (STATIC_ORIGINS.has(origin)) return { ok: true, how: "manifest" };
   const pattern = `${origin}/*`;
   const allowed = await chrome.permissions.contains({ origins: [pattern] });
   if (!allowed) return { ok: false, detail: "主机权限未授予，没有注册内容脚本" };
   const id = scriptId(origin);
+  const files = scriptFiles(origin);
   const existing = await chrome.scripting.getRegisteredContentScripts({ ids: [id] });
-  if (!existing.length) {
+  const current = existing[0];
+  const same = current && Array.isArray(current.js) && current.js.join(",") === files.join(",");
+  if (!same) {
+    if (current) await chrome.scripting.unregisterContentScripts({ ids: [id] });
     await chrome.scripting.registerContentScripts([
       {
         id,
         matches: [pattern],
-        js: ["yuanbao.js", "content.js"],
+        js: files,
         runAt: "document_idle",
         persistAcrossSessions: true,
       },
     ]);
   }
-  if (tabId) await chrome.scripting.executeScript({ target: { tabId }, files: ["yuanbao.js", "content.js"] });
+  if (tabId) await chrome.scripting.executeScript({ target: { tabId }, files });
   return { ok: true, how: "dynamic", id };
 }
 

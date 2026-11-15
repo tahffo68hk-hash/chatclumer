@@ -37,11 +37,14 @@ SITE_STATUS = {
     },
     "chatgpt": {"state": "BLOCKED", "detail": "本环境早前打开 https://chatgpt.com/ 停在挑战页。没有重试，没有绕过。"},
     "claude": {"state": "BLOCKED", "detail": "本环境早前打开 https://claude.ai/ 得到 403。没有重试，没有绕过。"},
-    "deepseek": {"state": "BLOCKED", "detail": "DeepSeek 需要登录后的标签页。本环境早前打开 https://chat.deepseek.com/ 得到 CloudFront 403。没有重试，没有绕过。"},
+    "deepseek": {
+        "state": "login_required",
+        "detail": "2026-11-15 协调方在已登录页面记录了输入框和回复结构。扩展 0.3.0 按该结构接入，实页发送和读回还没有再核对。停在 /sign_in 或出现登录输入框时不发送。",
+    },
     "grok": {"state": "login_wall", "detail": "本环境早前打开 https://grok.com/ 先是登录与 Cookie 说明，没有当成游客聊天。"},
     "doubao": {
-        "state": "UNVERIFIED",
-        "detail": "豆包需要登录后才有回复。本机还没有核验输入框，不会发送。",
+        "state": "login_required",
+        "detail": "2026-11-15 协调方在已登录页面记录了输入框和回复结构。扩展 0.3.0 按该结构接入，实页发送和读回还没有再核对。出现登录框时不发送。地区不可用页只回报「豆包当前网络地区不可用」，不绕过。",
     },
     "yuanbao": {
         "state": "guest_login_required",

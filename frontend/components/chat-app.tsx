@@ -1044,7 +1044,7 @@ export function ChatApp() {
             <Button size="sm" variant="secondary" data-testid="pair-code" onClick={() => void api.pairCode().then((item) => setPairCode(item.code)).catch((err) => setError(err.message))}>生成本机配对码</Button>
             <Button size="sm" variant="outline" onClick={() => { setSettingsOpen(false); setConnectOpen(true); }}>连接网页 AI</Button>
             {pairCode && <p data-testid="pair-code-value">配对码 {pairCode}。粘贴到扩展弹窗。令牌不会出现在这里或聊天记录里。五分钟内有效，用一次即失效。</p>}
-            <p className="text-xs text-[#6b6258]">手机可以打开群聊页面。网页发送要在开着扩展的这台电脑上完成。元宝游客输入已关闭，需先在该标签页登录一次。智谱游客可用，但扩展不自动点发送。DeepSeek 和豆包需要登录。</p>
+            <p className="text-xs text-[#6b6258]">手机可以打开群聊页面。网页发送要在开着扩展的这台电脑上完成。元宝游客输入已关闭，需先在该标签页登录一次。智谱游客可用，但扩展不自动点发送。DeepSeek 和豆包的适配器已按 2026-11-15 的页面结构接入，仍要先登录，实页发送还没有再核对。</p>
           </div>
         </DialogContent>
       </Dialog>

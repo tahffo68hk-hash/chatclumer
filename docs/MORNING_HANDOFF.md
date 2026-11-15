@@ -70,7 +70,7 @@ bash scripts/start.sh
 - 自由群聊不是固定全员轮询：首轮在没有 token/费用上限时并发独立回答；之后每轮通常只点一位（提及 +100、上一位建议 +40、刚说过的人 -35）。提示词带已公开记录。演示模板在被点到时总会写一段话，不会自己弃权。真实模型可以写出「没有新的观点」，之后调度可以不再点他。调度在发请求之前决定本轮谁不开口，模型不能零请求弃权。
 - 没有单价的 OpenRouter 模型（不是明确的 `:free` 结尾）直接拒绝，不会按 0 美元放行，也不会去掉后缀改走收费模型。`:free` 请求关闭 OpenRouter fallback。这次没有真实调用。
 - QQ / 微信仍是 `BLOCKED_EXTERNAL`。本轮没有做 P1。
-- 分组和网页桥已经接到房间里。独立分支、合并预览、拆分可以在页面上操作。网页成员只有绑定了明确标签、打开受控自动发送、并且房间没有费用上限时才会发送。Gemini 的游客回路通过了；Qwen 停在年龄确认；元宝游客输入从 2026-11-15 起要先在标签页登录一次，登录后的自动发送、读回和转发已在 07:46 用扩展 0.2.9 核对；智谱游客可用但扩展不自动点发送；DeepSeek 和豆包需要登录；ChatGPT、Claude 是 BLOCKED；Grok 是登录墙。详见 `WEB_ACCESS.md`。不要把夹具或被挡住的站点说成已经接通。
+- 分组和网页桥已经接到房间里。独立分支、合并预览、拆分可以在页面上操作。网页成员只有绑定了明确标签、打开受控自动发送、并且房间没有费用上限时才会发送。Gemini 的游客回路通过了；Qwen 停在年龄确认；元宝游客输入从 2026-11-15 起要先在标签页登录一次，登录后的自动发送、读回和转发已在 07:46 用扩展 0.2.9 核对；智谱游客可用但扩展不自动点发送；DeepSeek 和豆包已按 2026-11-15 的登录页结构接入，实页还没有再核对；ChatGPT、Claude 是 BLOCKED；Grok 是登录墙。详见 `WEB_ACCESS.md`。不要把夹具或被挡住的站点说成已经接通。
 
 ## 哪些能用
 
@@ -92,7 +92,7 @@ bash scripts/start.sh
 | 网页成员表单 | 来源、页面地址、绑定键、受控自动发送会写入 web-bind。卡片上可复制成员 ID 和绑定键 |
 | Qwen 网页 | 停在年龄确认，没有读到回复 |
 | ChatGPT / Claude 网页 | BLOCKED，没有绕过 |
-| DeepSeek / 豆包网页 | 需要登录。没有绕过，也没有发送 |
+| DeepSeek / 豆包网页 | 扩展 0.3.0 已按 2026-11-15 08:30 的只读 DOM 接入。实页发送和读回还没有再核对。未登录不发送 |
 | Grok 网页 | 登录墙，没有当成游客 |
 
 ## 三分钟试用
@@ -107,7 +107,8 @@ bash scripts/start.sh
 
 记录里的 UTC 已换成北京时间。2026-11-14T17:30:36Z 是 2026-11-15 01:30:36 CST。清单如下。
 
-- 旧的 21 个测试仍在。本机装了 Playwright 时，`cd backend && .venv/bin/pytest -q` 是 44 passed。其中 8 条是浏览器测试。没有 Playwright 时是 36 passed, 8 skipped。skipped 不是 passed。安装见 `backend/requirements-dev.txt`。
+- 旧的 21 个测试仍在。本机装了 Playwright 时，`cd backend && .venv/bin/pytest -q` 是 46 passed。其中 10 条是浏览器测试。没有 Playwright 时是 36 passed, 10 skipped。skipped 不是 passed。安装见 `backend/requirements-dev.txt`。
+- DeepSeek 与豆包的适配器在扩展 0.3.0。来源名是成员表单里的「DeepSeek」和「豆包」。实页发送和读回还没有再核对。
 - 元宝（登录后）在 2026-11-15 07:46 用扩展 0.2.9 实页核对通过：第一轮发送并读回 A/B 的答案 1；第三轮把林知秋的公开答复转发一次，读回与页面一致。元宝用户气泡与房间任务都是 2，没有多余发送，结束后输入框是空的。游客输入仍要先登录。此前第三轮曾因换行被拆段而报 145 对 128，没有发送。
 - 浏览器：`backend/.venv/bin/python scripts/check_branch_ui.py` 通过。预览里有勾选的两人，没有未勾选的第三人；合并后能选择发给哪一组；拆分后刷新，状态不是进行中。
 - 扩展：品牌版 Chrome 157 不接受 `--load-extension`。Chrome for Testing 加载 `extension/` 后，`scripts/check_web_bridge.py` 的夹具和 Gemini 都是 passed。夹具第二次提交含「公开答复」，停止后仍是 2 条用户气泡，房间里有 2 条完成回复，模型名是「Fixture 本地」。

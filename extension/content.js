@@ -12,8 +12,21 @@ function siteFrom(url) {
   if (url.startsWith("http://127.0.0.1:43124/fixture")) return "fixture";
   if (url.startsWith("https://gemini.google.com/")) return "gemini";
   if (url.startsWith("https://yuanbao.tencent.com/")) return "yuanbao";
+  if (url.startsWith("https://chat.deepseek.com/")) return "deepseek";
+  if (url.startsWith("https://www.doubao.com/")) return "doubao";
   if (url.startsWith("https://chatglm.cn/")) return "zhipu";
   return "";
+}
+
+function managedSite(site) {
+  return site === "yuanbao" || site === "deepseek" || site === "doubao";
+}
+
+function siteDispatch(site) {
+  if (site === "yuanbao" && typeof yuanbaoDispatchSend === "function") return yuanbaoDispatchSend;
+  if (site === "deepseek" && typeof deepseekDispatchSend === "function") return deepseekDispatchSend;
+  if (site === "doubao" && typeof doubaoDispatchSend === "function") return doubaoDispatchSend;
+  return null;
 }
 
 const adapters = {
@@ -67,6 +80,44 @@ const adapters = {
     timeoutDetail: (beforeCount) => (typeof yuanbaoTimeoutNote === "function" ? yuanbaoTimeoutNote(document, beforeCount) : "超时"),
     login: () => typeof yuanbaoLogin === "function" && yuanbaoLogin(document),
     loginDetail: () => (typeof yuanbaoLoginDetail === "function" ? yuanbaoLoginDetail() : "页面停在登录或验证，没有点击发送"),
+  },
+  deepseek: {
+    composer: () => (typeof deepseekComposer === "function" ? deepseekComposer(document) : null),
+    send: () => (typeof deepseekSend === "function" ? deepseekSend(document) : null),
+    assistants: () => (typeof deepseekAssistants === "function" ? deepseekAssistants(document) : []),
+    text: (node) => (typeof deepseekText === "function" ? deepseekText(node) : ""),
+    done: (node) => (typeof deepseekDone === "function" ? deepseekDone(node) : false),
+    model: () => "",
+    openNew: () => null,
+    onlyNew: true,
+    readCap: 90000,
+    stableMs: 2500,
+    replyNode: (prompt) => (typeof deepseekNewReply === "function" ? deepseekNewReply(document, prompt) : null),
+    idle: () => typeof deepseekSendIdle !== "function" || deepseekSendIdle(document),
+    partial: (node) => (typeof deepseekPartial === "function" ? deepseekPartial(node) : ""),
+    timeoutDetail: (beforeCount) => (typeof deepseekTimeoutNote === "function" ? deepseekTimeoutNote(document, beforeCount) : "超时"),
+    login: () => typeof deepseekLogin === "function" && deepseekLogin(document),
+    loginDetail: () => (typeof deepseekLoginDetail === "function" ? deepseekLoginDetail() : "页面停在登录或验证，没有点击发送"),
+    stop: () => (typeof deepseekInStopState === "function" && deepseekInStopState(deepseekSend(document)) ? deepseekSend(document) : null),
+  },
+  doubao: {
+    composer: () => (typeof doubaoComposer === "function" ? doubaoComposer(document) : null),
+    send: () => (typeof doubaoSend === "function" ? doubaoSend(document) : null),
+    assistants: () => (typeof doubaoNewReply === "function" ? [...document.querySelectorAll("[data-testid='receive_message']")] : []),
+    text: (node) => (typeof doubaoText === "function" ? doubaoText(node) : ""),
+    done: (node) => (typeof doubaoDone === "function" ? doubaoDone(node) : false),
+    model: () => "",
+    openNew: () => null,
+    onlyNew: true,
+    readCap: 90000,
+    stableMs: 2500,
+    replyNode: (prompt) => (typeof doubaoNewReply === "function" ? doubaoNewReply(document, prompt) : null),
+    idle: () => typeof doubaoSendIdle !== "function" || doubaoSendIdle(document),
+    partial: (node) => (typeof doubaoPartial === "function" ? doubaoPartial(node) : ""),
+    timeoutDetail: (beforeCount) => (typeof doubaoTimeoutNote === "function" ? doubaoTimeoutNote(document, beforeCount) : "超时"),
+    login: () => typeof doubaoLogin === "function" && doubaoLogin(document),
+    loginDetail: () => (typeof doubaoLoginDetail === "function" ? doubaoLoginDetail(document) : "页面停在登录或验证，没有点击发送"),
+    stop: () => (typeof doubaoStop === "function" ? doubaoStop(document) : null),
   },
   zhipu: {
     composer: () => null,
@@ -149,6 +200,16 @@ async function waitNew(adapter, before, signal, prompt) {
 }
 
 function clickSiteStop() {
+  const site = siteFrom(location.href);
+  const adapter = adapters[site];
+  if (adapter && typeof adapter.stop === "function") {
+    const el = adapter.stop();
+    if (!el) return false;
+    if (typeof doubaoPress === "function" && site === "doubao") doubaoPress(el);
+    else if (typeof deepseekPress === "function" && site === "deepseek") deepseekPress(el);
+    else el.click();
+    return true;
+  }
   const labels = new Set(["Stop", "Stop response", "Stop Answering", "停止", "停止生成", "停止回答", "停止对话"]);
   const el = [...document.querySelectorAll("[aria-label]")].find((node) => {
     return labels.has(node.getAttribute("aria-label") || "") && !dangerous(node) && !node.hidden;
@@ -170,6 +231,15 @@ function cancelResult() {
 }
 
 function releaseComposer(box) {
+  const site = siteFrom(location.href);
+  if (site === "deepseek" && typeof deepseekClearComposer === "function") {
+    deepseekClearComposer((typeof deepseekComposer === "function" && deepseekComposer(document)) || box);
+    return;
+  }
+  if (site === "doubao" && typeof doubaoClearComposer === "function") {
+    doubaoClearComposer((typeof doubaoComposer === "function" && doubaoComposer(document)) || box);
+    return;
+  }
   if (typeof yuanbaoClearComposer !== "function") return;
   const composer = (typeof yuanbaoComposer === "function" && yuanbaoComposer(document)) || box;
   if (composer) yuanbaoClearComposer(composer);
@@ -262,22 +332,24 @@ async function runJob(job) {
     const box = adapter.composer();
     if (!box) return { status: "error", detail: "找不到输入框", page_url: pageUrl };
     if (signal.cancelled || job.action === "cancel") {
-      if (site === "yuanbao") releaseComposer(box);
+      if (managedSite(site)) releaseComposer(box);
       return { ...cancelResult(), page_url: pageUrl };
     }
-    if (site !== "yuanbao") fillComposer(box, job.prompt);
+    const dispatch = siteDispatch(site);
+    if (!dispatch) fillComposer(box, job.prompt);
     remember(job.request_id);
     let posted = false;
-    if (typeof yuanbaoDispatchSend === "function" && site === "yuanbao") {
+    if (dispatch) {
       reportPhase(job, "filled");
-      const outcome = await yuanbaoDispatchSend(document, job.prompt, 10000, () => signal.cancelled);
+      const outcome = await dispatch(document, job.prompt, 10000, () => signal.cancelled);
       if (signal.cancelled || outcome.detail === "cancelled") {
         if (!outcome.ok) clearIfUnsent(box, job.prompt);
         releaseComposer(box);
         return { ...cancelResult(), page_url: pageUrl };
       }
       if (!outcome.ok) {
-        if (String(outcome.detail || "").includes("元宝需要登录")) {
+        const detail = String(outcome.detail || "");
+        if (detail.includes("需要登录") || detail.includes("豆包当前网络地区不可用")) {
           return { status: "login", detail: outcome.detail, page_url: pageUrl };
         }
         clearIfUnsent(box, job.prompt);
@@ -303,7 +375,7 @@ async function runJob(job) {
     const timedOut = String(result.detail || "").startsWith("超时");
     if (result.status === "cancelled" || timedOut) {
       if (!posted) clearIfUnsent(box, job.prompt);
-      if (site === "yuanbao") releaseComposer(box);
+      if (managedSite(site)) releaseComposer(box);
     }
     if (timedOut) reportPhase(job, "timeout", result.detail);
     if (result.status === "cancelled" && !String(result.detail || "").includes("停止")) {
