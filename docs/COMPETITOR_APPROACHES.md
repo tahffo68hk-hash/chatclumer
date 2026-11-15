@@ -32,7 +32,7 @@
 - **页面检查。** 不发送，只找输入框、发送键和消息容器；结果显示在扩展弹窗和房间的成员卡片上，适配一坏马上能看到。
 - **诊断快照。** 只取聊天栏的结构，正文全部打码，方便写新选择器。
 - **API 通道（借鉴 Cherry Studio 和 LobeHub）。** OpenAI 兼容接口，内置 OpenAI、DeepSeek、通义（DashScope 兼容模式）、硅基流动、OpenRouter 和本机 Ollama 的预设。密钥只存在本机后端，可以和网页成员混在同一个房间。
-- **分发（交给另一个代理实现）。** 打包脚本、一键安装和桌面壳的规格见下一节。
+- **分发。** 打包脚本、一键安装和桌面壳的规格见下一节。实现在 `scripts/install.sh`、`scripts/install.ps1`、`scripts/build_release.py`、`.github/workflows/release.yml` 和 `desktop/`。桌面壳是原型，尚未在真实网站上验证，说明见 `docs/DESKTOP.md`。
 
 ## 桌面壳与打包交接规格（Desktop shell & packaging handoff）
 

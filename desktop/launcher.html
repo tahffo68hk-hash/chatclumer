@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>网页 AI（原型）</title>
+  <style>
+    body { font: 15px/1.45 sans-serif; margin: 0; padding: 16px 18px 28px; color: #1c1917; background: #faf7f2; }
+    h1 { font-size: 18px; margin: 0 0 8px; }
+    .banner { background: #fff4d6; border: 1px solid #e6c36a; padding: 10px 12px; border-radius: 8px; }
+    p { margin: 8px 0; }
+    button { font: inherit; padding: 6px 12px; }
+    ul { list-style: none; padding: 0; margin: 12px 0; }
+    li { background: #fff; border: 1px solid #e7e1d8; border-radius: 8px; padding: 10px 12px; margin: 0 0 8px; }
+    .home { color: #57534e; font-size: 12px; word-break: break-all; }
+    label { display: block; font-size: 13px; margin: 6px 0; }
+    input { width: 100%; box-sizing: border-box; font: inherit; padding: 4px 6px; }
+    #status { font-size: 13px; color: #44403c; }
+  </style>
+</head>
+<body>
+  <h1>网页 AI（原型）</h1>
+  <div class="banner">
+    <b>这是原型，尚未在真实网站上验证。</b>
+    每个站点一个窗口，登录状态留在本机分区里。不读取 Cookie，不调用站点私有接口，不绕过登录、验证码或人机验证。写不进去或页面没发出时，仍会清空并报告「已填入，未发送」。
+  </div>
+  <p id="status">正在检查本机服务…</p>
+  <ul id="sites"></ul>
+  <script src="launcher.js"></script>
+</body>
+</html>

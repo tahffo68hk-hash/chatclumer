@@ -6,7 +6,7 @@
 
 ## 安装扩展并配对
 
-1. `bash scripts/start.sh`
+1. `bash scripts/install.sh`（或沿用 `bash scripts/start.sh`）。Windows 用 `scripts\install.ps1`。桌面壳原型见 `docs/DESKTOP.md`，它不代替这里的扩展步骤。
 2. Chrome 打开 `chrome://extensions`，打开开发者模式，加载已解压的 `extension/`。
 3. 房间里给成员绑定站点、来源和标签键，并打开受控自动发送。
 4. 扩展弹窗粘贴本机配对码。配对令牌只留在浏览器里，不会写进聊天或日志。

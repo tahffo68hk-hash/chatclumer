@@ -16,5 +16,6 @@ backend/.pytest_cache/
 !.env.example
 *.pem
 .run/
+desktop/release/
 *.pyc
 .DS_Store

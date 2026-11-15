@@ -1,0 +1,64 @@
+{
+  "name": "chatclumer-desktop",
+  "version": "0.5.0",
+  "private": true,
+  "description": "ChatClumer desktop shell prototype. Not verified on live sites. Does not read cookies or bypass login.",
+  "main": "main.js",
+  "author": "ChatClumer",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.js",
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "33.4.11",
+    "electron-builder": "25.1.8",
+    "jsdom": "25.0.1"
+  },
+  "build": {
+    "appId": "app.chatclumer.desktop",
+    "productName": "ChatClumer",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "launcher-preload.js",
+      "launcher.html",
+      "launcher.js",
+      "offline.html",
+      "boot.js",
+      "host.js",
+      "sites.js",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../extension",
+        "to": "extension",
+        "filter": ["**/*"]
+      }
+    ],
+    "asar": true,
+    "npmRebuild": false,
+    "linux": {
+      "target": ["AppImage", "deb"],
+      "category": "Network"
+    },
+    "win": {
+      "target": ["nsis", "portable"],
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "portable": {
+      "artifactName": "ChatClumer-${version}-portable.${ext}"
+    }
+  }
+}

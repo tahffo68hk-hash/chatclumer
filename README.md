@@ -63,10 +63,56 @@ Windows 使用 `scripts/start.ps1` 和 `scripts/stop.ps1`，同样只绑定回�
 只有在你接受无登录风险时才打开局域网前端：
 
 ```bash
-LAN=1 bash scripts/start.sh
+LAN=1 bash scripts/install.sh
 ```
 
-前端会监听 `0.0.0.0:43123` 并打印警告。后端仍在 `127.0.0.1`。不要把没有认证的服务暴露到公网。
+`install.sh` 会把 `LAN=1` 交给 `scripts/start.sh`。前端会监听 `0.0.0.0:43123` 并打印警告。后端仍在 `127.0.0.1`。不要把没有认证的服务暴露到公网。Windows 的 `install.ps1` 同样把 `LAN=1` 交给 `start.ps1`。
+
+## 一键安装
+
+不需要管理员，也不会把密钥写进脚本或日志。缺了 Python 或 Node 就停下并说明去哪里装，不会静默安装系统包。再跑一次是安全的：虚拟环境会复用，服务已经在听就直接告诉你地址。
+
+```bash
+bash scripts/install.sh
+```
+
+预演（只检查版本，不安装、不启动）：`bash scripts/install.sh --dry-run`
+
+Windows（在仓库根目录）：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install.ps1
+```
+
+预演：在上面的命令末尾加上 `-DryRun`。
+
+装完后终端会打印应用地址，以及加载扩展的步骤。也可以改开下面的桌面壳原型，那样不用装扩展、不用抄配对码。
+
+## 发布包
+
+版本号来自 `extension/manifest.json`（现在是 0.5.0）。在仓库里执行：
+
+```bash
+python3 scripts/build_release.py --out dist
+```
+
+会得到三样东西，不会上传、也不会打 tag：
+
+- `chatclumer-<version>.zip`：后端和前端源码、`scripts/`、`extension/`、`desktop/`、`docs/`、`README.md` 和 `LICENSE`。不含 `backend/data/`、`.venv`、`node_modules`、`.next`、`.run/` 或密钥。
+- `chatclumer-extension-<version>.zip`：扩展文件在 zip 根目录（含 `adapters/`），解压后到 `chrome://extensions` 加载，也可以作为商店包的底稿。
+- `SHA256SUMS`：上面两个 zip 的校验和。应用包里面另有一份源文件校验和。
+
+推送 `v*` tag 时，`.github/workflows/release.yml` 会跑测试、打这两个包，并挂到同名的 GitHub Release。普通提交不会发版。本仓库的说明不代替你自己去创建 tag。
+
+## 桌面壳（原型）
+
+尚未在真实网站上验证。细节和限制见 [`docs/DESKTOP.md`](docs/DESKTOP.md)。
+
+```bash
+cd desktop && npm install && npm start
+```
+
+它打开 `http://127.0.0.1:43123`，并为注册表里的每个网页 AI 开一个带持久分区的窗口。主进程走本机回环自动配对。页面上的写入、单击和「已填入，未发送」仍是 `extension/` 里的那批脚本。不读 Cookie，不绕过登录或验证码。Windows（nsis / portable）和 Linux（AppImage / deb）的 electron-builder 配置在 `desktop/package.json`，不在 tag 的发布流程里自动构建。
 
 **API 成员：** 添加成员时选一个提供方。API Base 留空就用预设地址；本机服务（Ollama、LM Studio，或任何 `127.0.0.1` 上的兼容接口）视为零费用。选 Ollama 时，页面会列出本机已有的模型。云端接口要先配好密钥，再在设置里打开「允许可能计费的调用」。
 
@@ -115,14 +161,18 @@ flowchart LR
   UI["Next.js<br/>127.0.0.1:43123"] --> API["FastAPI + SQLite<br/>127.0.0.1:43124"]
   API --> Bridge["本机回环桥<br/>任务 / 心跳 / 页面检查"]
   Bridge --> Ext["Chrome MV3 扩展"]
+  Bridge --> Desk["桌面壳原型<br/>Electron，未实页验证"]
   Reg["适配器注册表 JSON<br/>内置 + 远端（校验后才用）"] --> Ext
+  Reg --> Desk
   Ext --> Tabs["已授权的网页 AI 标签"]
+  Desk --> Views["各站独立窗口<br/>持久分区，不读 Cookie"]
   API --> Providers["OpenAI 兼容 API / Ollama<br/>默认不发出计费请求"]
   Eval["backend/eval<br/>单模型 vs 群聊"] --> API
 ```
 
 - **前后端。** 浏览器里的页面把 `/backend` 转到本机 FastAPI。房间、成员、消息和扩展任务存在 SQLite。
 - **扩展。** 轮询回环桥，只操作已绑定的标签页。游客站的选择器和规则来自注册表：内置一份，远端一份。DeepSeek、豆包、元宝的注册表条目只供页面检查。远端注册表只有在结构合法、版本更新、选择器都能解析时才启用，任何一项不满足都继续用内置。
+- **桌面壳。** 原型，尚未在真实网站上验证。它加载同一份注册表和内容脚本，用本机回环自动配对，不读 Cookie。
 - **页面检查。** 结果随心跳回到后端，显示在成员卡片上。
 - **API 成员。** 和网页成员共用同一套调度。云端模型要另配密钥，并且只有在 `ALLOW_PAID_PROVIDERS=1` 时，才会考虑可能计费的接口。
 
@@ -135,7 +185,7 @@ flowchart LR
 | 网页 AI | 调网页私有接口 | 内嵌网页，写死的选择器 | 调网页私有接口，或用自己的 API Key | 基本不做 | 只操作可见页面，不读 Cookie、不调私有接口 |
 | 适配坏了 | 发新版（仓库已归档） | 发新版 | 转向 API 和自营服务 | 不涉及 | 改注册表 JSON，扩展自动拉取；页面检查马上报出哪个角色坏了 |
 | API | 有 | 少量 | 有 | 主力 | OpenAI 兼容 + Ollama，和网页成员同房 |
-| 分发 | 桌面安装包 | 桌面安装包 | 扩展商店 + 网页 | 安装包 / Docker | 目前是本机脚本 + 解压加载扩展；一键安装和桌面壳的规格已写好，待实现 |
+| 分发 | 桌面安装包 | 桌面安装包 | 扩展商店 + 网页 | 安装包 / Docker | 一键安装脚本和带校验和的发布包；桌面壳是原型，未在实页验证 |
 
 ## 项目结构
 
@@ -145,8 +195,9 @@ backend/eval/     评测：固定题集、单模型 vs 群聊、报告（自带�
 frontend/         Next.js 房间界面
 extension/        Chrome MV3 内容脚本、后台和弹窗
 extension/adapters/  适配器注册表（registry.json）、结构校验、运行时（页面检查、诊断快照）
-scripts/          启动、停止和界面检查
-docs/             站点记录、交接和截图
+desktop/          Electron 桌面壳原型（复用扩展脚本和注册表，未实页验证）
+scripts/          安装、启动、停止、发布包和界面检查
+docs/             站点记录、桌面壳说明、交接和截图
 .env.example      环境变量名字，不含真实密钥
 ```
 
@@ -158,7 +209,9 @@ docs/             站点记录、交接和截图
 cd backend && .venv/bin/pytest -q
 ```
 
-不装 Playwright 时，项目自带的 venv 跑出 **54 passed, 7 skipped**（跳过的都是浏览器测试）。浏览器测试是在另一个装了 Playwright 的环境里跑的：真实 DOM 回放、注册表页面检查、远端注册表的接受与拒绝、诊断快照打码等。
+安装脚本的预演、发布包内容和桌面壳的协议 / 夹具 DOM 测试都在这套里面（`backend/tests/test_distribution.py`）。夹具测试会在第一次运行时用 npm 安装 `jsdom`，不需要 Playwright。
+
+不装 Playwright 时，项目自带的 venv 跑出 **61 passed, 7 skipped**（跳过的都是浏览器测试）。浏览器测试是在另一个装了 Playwright 的环境里跑的：真实 DOM 回放、注册表页面检查、远端注册表的接受与拒绝、诊断快照打码等。
 
 改了 `extension/adapters/registry.json` 之后，要重新生成内置副本：
 
@@ -201,8 +254,8 @@ backend/.venv/bin/python scripts/check_web_bind_ui.py
 
 ## 路线
 
-- **0.5.x：** 用 0.5.2 在实页上回归智谱清言（点内层图标）和 Z.ai（人机验证回报），并核对弹窗的注册表状态。
-- **分发：** 一键安装脚本（`install.sh` / `install.ps1`）、带版本号的发布包，以及内嵌网页的桌面壳（参考 ChatALL、GodMode 的内置窗口，复用同一份注册表）。规格见 [`docs/COMPETITOR_APPROACHES.md`](docs/COMPETITOR_APPROACHES.md) 的交接一节。
+- **0.5.x：** 0.5.1/0.5.2 已在千问、文心、DeepSeek、智谱清言、Z.ai 实页通过。千问和 Z.ai 游客通道时好时坏（权限提示、人机验证），插件会直接回报。
+- **分发：** 一键安装和 tag 上的发布包已经接上。桌面壳能打开本机页面并按注册表嵌入站点，但是原型：没有在真实网站上跑过。规格和限制见 [`docs/DESKTOP.md`](docs/DESKTOP.md) 与 [`docs/COMPETITOR_APPROACHES.md`](docs/COMPETITOR_APPROACHES.md)。
 - **评测：** 用真实成员（本机 Ollama 免费）跑一遍 `backend/eval`，替换自带的模拟结果。
 - **站点：** 元宝游客输入仍要先登录。仍被挡住的站点只在可见页面可用之后再接，不换入口绕过。
 - **QQ 与微信：** 只考虑官方机器人、公众号或企业微信，不做个人账号。
