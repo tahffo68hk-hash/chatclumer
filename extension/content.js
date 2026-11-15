@@ -1,4 +1,22 @@
-const DANGER = /升级|订阅|付费|支付|购买|删除|清空|注销|delete|upgrade|subscribe|remove|buy/i;
+// 同一页面会被重复注入（绑定标签页、页面检查都会走 executeScript）。整份放在守卫里：
+// 同一个活着的扩展实例已经装过就什么都不做——不重置进行中的任务，不重复挂监听，也不会再报「已声明」。
+// 扩展重载后旧实例失效（chrome.runtime.id 取不到），或扩展版本变了，才会重新装一遍。
+if ((function (key) {
+  var done = (globalThis.__chatclumerLoaded = globalThis.__chatclumerLoaded || {});
+  var alive = false;
+  var ver = "";
+  try {
+    alive = !!(chrome.runtime && chrome.runtime.id);
+    ver = (alive && chrome.runtime.getManifest && chrome.runtime.getManifest().version) || "";
+  } catch (e) {
+    alive = false;
+  }
+  // 记下装的是哪个版本：同版本、扩展还活着才跳过；升级后旧版本留下的标记不会挡住新代码。
+  if (alive && done[key] && done[key] === (ver || true)) return false;
+  done[key] = ver || true;
+  return true;
+})("content")) {
+var DANGER = /升级|订阅|付费|支付|购买|删除|清空|注销|delete|upgrade|subscribe|remove|buy/i;
 
 function labelOf(el) {
   return `${el.getAttribute("aria-label") || ""} ${el.innerText || ""}`.trim();
@@ -22,7 +40,7 @@ function siteFrom(url) {
   return "";
 }
 
-const GUEST_SITE_IDS = ["qwen", "chatgpt", "wenxin", "zhipu", "zai"];
+var GUEST_SITE_IDS = ["qwen", "chatgpt", "wenxin", "zhipu", "zai"];
 
 function guestSite(site) {
   return GUEST_SITE_IDS.includes(site) && typeof guestDispatchSend === "function";
@@ -40,7 +58,7 @@ function siteDispatch(site) {
   return null;
 }
 
-const adapters = {
+var adapters = {
   fixture: {
     composer: () => document.querySelector("#composer"),
     send: () => document.querySelector("#send"),
@@ -164,8 +182,8 @@ function guestAdapter(site) {
 
 for (const site of GUEST_SITE_IDS) adapters[site] = guestAdapter(site);
 
-const sent = new Set(JSON.parse(sessionStorage.getItem("bridge-sent") || "[]"));
-let busy = false;
+var sent = new Set(JSON.parse(sessionStorage.getItem("bridge-sent") || "[]"));
+var busy = false;
 
 function remember(id) {
   sent.add(id);
@@ -486,7 +504,7 @@ async function runJob(job) {
   }
 }
 
-let pending = null;
+var pending = null;
 
 function extensionAlive() {
   try {
@@ -503,7 +521,7 @@ function claimJob(id) {
   return true;
 }
 
-const TASK_KEY = "bridge-active-task";
+var TASK_KEY = "bridge-active-task";
 
 function saveTask(job, phase) {
   try {
@@ -557,9 +575,9 @@ async function resumeJob(job) {
   }
 }
 
-if (!globalThis.__roomBridge) {
+{
 globalThis.__roomBridge = true;
-const bridgeToken = {};
+var bridgeToken = {};
 globalThis.__roomBridgeToken = bridgeToken;
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (globalThis.__roomBridgeToken !== bridgeToken) return;
@@ -591,7 +609,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   });
   return true;
 });
-const restored = loadTask();
+var restored = loadTask();
 if (restored && restored.request_id && siteFrom(location.href) === restored.site) {
   try {
     chrome.runtime.sendMessage({ type: "task-alive", job: restored });
@@ -599,4 +617,10 @@ if (restored && restored.request_id && siteFrom(location.href) === restored.site
     /* 后台不在时，下一次轮询仍会按任务号续上 */
   }
 }
+}
+
+// 块里的 async 函数不会自动成为全局函数，显式挂到全局，供其他内容脚本调用。
+globalThis.waitNew = waitNew;
+globalThis.runJob = runJob;
+globalThis.resumeJob = resumeJob;
 }

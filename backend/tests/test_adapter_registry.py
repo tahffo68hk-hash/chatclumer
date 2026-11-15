@@ -23,7 +23,7 @@ def registry():
     return json.loads(REG.read_text(encoding="utf-8"))
 
 
-def validate(data, ext="0.5.0"):
+def validate(data, ext="0.5.1"):
     script = (
         "const s=require(process.argv[1]);let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{"
         "console.log(JSON.stringify(s.validateRegistry(JSON.parse(d),process.argv[2])))})"
@@ -70,7 +70,10 @@ def test_schema_accepts_bundled_and_rejects_bad_data():
     i = registry(); i["filler"] = "x" * 200000; bad.append(i)
     for item in bad:
         assert validate(item)["ok"] is False
-    assert validate(registry(), ext="0.4.4")["ok"] is False  # min_extension 0.5.0
+    assert validate(registry(), ext="0.4.4")["ok"] is False
+    assert validate(registry(), ext="0.5.0")["ok"] is False  # min_extension 0.5.1（send_after_input 是 0.5.1 才认识的开关）
+    j = registry(); j["sites"]["qwen"]["flags"]["send_after_input"] = "yes"; bad.append(j)
+    assert validate(j)["ok"] is False
 
 
 def test_clean_health_keeps_only_check_fields():
@@ -85,6 +88,8 @@ def test_clean_health_keeps_only_check_fields():
     assert clean["roles"]["composer"] == {"found": 1, "index": 0}
     assert clean["registry_version"] == "2026.11.15.1"
     assert clean_health("nope") is None
+    deferred = clean_health({**raw, "ok": True, "missing": [], "deferred": ["send", "page_text"]})
+    assert deferred["ok"] is True and deferred["deferred"] == ["send"]
 
 
 def test_heartbeat_health_shows_on_the_member_and_registry_is_served(tmp_path):

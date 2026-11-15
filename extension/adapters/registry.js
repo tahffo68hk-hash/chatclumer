@@ -2,8 +2,8 @@
 globalThis.CHATCLUMER_REGISTRY = {
   "schema": "chatclumer.adapters",
   "schema_version": 1,
-  "version": "2026.11.15.1",
-  "min_extension": "0.5.0",
+  "version": "2026.11.15.2",
+  "min_extension": "0.5.1",
   "source": "2026-11-15 实页 DOM 导出（dom-dumps）",
   "common": {
     "dialogs": [
@@ -109,7 +109,10 @@ globalThis.CHATCLUMER_REGISTRY = {
           "where": "dialog",
           "detail": "需要先在页面上完成确认（Qwen 年龄确认），扩展不会替你点"
         }
-      ]
+      ],
+      "flags": {
+        "send_after_input": true
+      }
     },
     "chatgpt": {
       "engine": "guest",

@@ -56,6 +56,44 @@ def test_health_finds_composer_and_send_without_writing(site):
     assert result["clicks"] == 0 and result["same"] is True
 
 
+DEFERRED = """([site, typed]) => {
+  // 真实 Qwen 在输入框为空时不渲染发送键：把导出里的发送键拿掉来模拟。
+  document.querySelectorAll("button.send-button, #send-message-button").forEach((el) => el.remove());
+  const box = document.querySelector("textarea");
+  box.value = typed;
+  let clicks = 0, inputs = 0;
+  document.addEventListener("click", () => { clicks += 1; }, true);
+  document.addEventListener("input", () => { inputs += 1; }, true);
+  const h = ChatclumerAdapters.health(site, document);
+  return { h, clicks, inputs, value: box.value };
+}"""
+
+
+def test_qwen_send_rendered_only_after_input_is_deferred_not_failed():
+    with sync_playwright() as playwright:
+        browser, page = page_with(playwright, "qwen", "0-empty")
+        empty = page.evaluate(DEFERRED, ["qwen", ""])
+        page.close()
+        browser.close()
+        browser, page = page_with(playwright, "qwen", "0-empty")
+        typed = page.evaluate(DEFERRED, ["qwen", "用户自己打的字"])
+        browser.close()
+        browser, page = page_with(playwright, "zai", "0-empty")
+        other = page.evaluate(DEFERRED, ["zai", ""])
+        browser.close()
+    h = empty["h"]
+    assert h["ok"] is True, h
+    assert h["deferred"] == ["send"] and h["missing"] == []
+    assert h["roles"]["send"]["deferred"] is True
+    assert "输入文字后才出现" in h["detail"]
+    # 页面检查从不写入、不点击。
+    assert empty["clicks"] == 0 and empty["inputs"] == 0 and empty["value"] == ""
+    # 输入框里已经有字却还没有发送键：那才是真缺失。
+    assert typed["h"]["ok"] is False and typed["h"]["missing"] == ["send"] and typed["value"] == "用户自己打的字"
+    # 没有这个开关的站点照旧算缺失。
+    assert other["h"]["ok"] is False and other["h"]["missing"] == ["send"] and other["h"]["deferred"] == []
+
+
 def newer(mutate):
     data = copy.deepcopy(REG)
     data["version"] = "2099.1.1.1"

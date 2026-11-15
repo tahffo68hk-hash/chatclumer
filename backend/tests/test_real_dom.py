@@ -312,3 +312,63 @@ def test_real_dom_chatgpt_sign_in_card_is_reported_before_writing():
     assert "ChatGPT 需要登录后才能继续" in result["detail"]
     assert result["sends"] == 0
     assert result["writes"] == 0
+
+
+FRAMEWORK_GLM = """async ([prompt, trustedOnly]) => {
+  // 模拟站点框架自己的输入状态：只有输入事件（可选：只认浏览器产生的 isTrusted 事件）才更新模型，
+  // 发送键的 .empty 由模型驱动；点发送时模型为空就什么都不做——和真实站点「填了但没发出去」同一种失败形态。
+  const box = document.querySelector("#search-input-box textarea");
+  const icon = document.querySelector("#search-input-box .enter-icon-container");
+  const send = document.querySelector("#search-input-box div.enter.is-main-chat");
+  let model = "";
+  const events = [];
+  const render = () => icon.classList.toggle("empty", !model);
+  box.addEventListener("input", (event) => {
+    events.push(event.isTrusted ? "trusted" : "synthetic");
+    if (trustedOnly && !event.isTrusted) return;
+    model = box.value;
+    render();
+  });
+  render();
+  let clicks = 0, posted = [];
+  send.addEventListener("click", () => {
+    clicks += 1;
+    if (!model) return;
+    posted.push(model);
+    document.body.insertAdjacentHTML("beforeend", '<div class="conversation-item"><div class="conversation question"><div class="question-txt"><span></span></div></div></div>');
+    document.querySelector(".conversation-item:last-child .question-txt span").textContent = model;
+    model = ""; box.value = ""; render();
+  });
+  const outcome = await guestDispatchSend("zhipu", document, prompt, 3000);
+  return { ok: outcome.ok, detail: outcome.detail || "", clicks, posted, events, empty: box.value === "" };
+}"""
+
+
+def _open_state(playwright, site, state):
+    spec = SITES[site]
+    url, html = load(spec["file"], state)
+    browser = playwright.chromium.launch(channel="chrome", headless=True)
+    page = browser.new_page(viewport={"width": 1280, "height": 860})
+    page.route("**/*", lambda route: route.fulfill(status=200, content_type="text/html; charset=utf-8", body=html)
+               if route.request.resource_type == "document" else route.abort())
+    page.goto(url, wait_until="domcontentloaded")
+    page.evaluate("""() => { window.chrome = { runtime: { id: "room", sendMessage() {}, onMessage: { addListener() {}, removeListener() {} } } }; }""")
+    add_adapters(page)
+    page.add_script_tag(path=str(ROOT / "extension" / spec["script"]))
+    page.add_script_tag(path=str(ROOT / "extension" / "content.js"))
+    page.evaluate("() => document.querySelectorAll('textarea').forEach((el) => { el.value = ''; })")
+    return browser, page
+
+
+@pytest.mark.parametrize("trusted_only", [False, True])
+def test_real_dom_zhipu_framework_state_sees_the_write_before_the_one_click(trusted_only):
+    with sync_playwright() as playwright:
+        browser, page = _open_state(playwright, "zhipu", "0-empty")
+        result = page.evaluate(FRAMEWORK_GLM, [PROMPT, trusted_only])
+        browser.close()
+    assert result["ok"] is True, result
+    assert result["clicks"] == 1
+    assert result["posted"] == [PROMPT]
+    # 先清空（合成事件），再用 execCommand 写入：浏览器产生的 input 事件是 isTrusted 的，框架只认可信事件时也能看到文字。
+    # 0.4.3 的 guest.js 在同一模型下事件序列完全相同（synthetic, trusted）。
+    assert result["events"] == ["synthetic", "trusted"]

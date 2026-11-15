@@ -515,3 +515,101 @@ def test_deepseek_falls_back_when_streaming_state_is_unknown():
     assert result["status"] == "complete"
     assert result["text"] == "没有按钮也能收尾。"
     assert 5500 <= result["elapsed"] < 12000
+
+
+DEEPSEEK_VIRTUAL_PAGE = """
+<meta charset="utf-8">
+<div class="ds-virtual-list-visible-items">
+  <div data-virtual-list-item-key="1"><div class="ds-message"><div class="ds-collapsible-text"><span>{OLD_Q}</span></div></div></div>
+  <div data-virtual-list-item-key="2"><div class="ds-message"><div class="ds-markdown ds-assistant-message-main-content"><p>旧回答</p></div></div>
+    <div class="ds-flex"><div role="button" class="ds-button ds-button--iconLabelTertiary">复制</div></div></div>
+</div>
+<div class="bf38813a">
+  <textarea placeholder="Message DeepSeek" name="search" rows="2"></textarea>
+  <div role="button" class="ds-button ds-button--circle ds-button--m ds-button--disabled"><svg class="x1"></svg></div>
+</div>
+"""
+
+# 点发送：先出现用户气泡（确认发出），随后回复开始流式输出，虚拟列表把上面的条目（含本次用户气泡）移出 DOM。
+VIRTUAL_SEND = """([mode]) => {
+  window.__sends = 0;
+  const box = document.querySelector("textarea");
+  const send = document.querySelector(".ds-button--circle");
+  const list = document.querySelector(".ds-virtual-list-visible-items");
+  box.addEventListener("input", () => send.classList.toggle("ds-button--disabled", !box.value));
+  const item = (key, html) => { const el = document.createElement("div"); el.setAttribute("data-virtual-list-item-key", key); el.innerHTML = html; list.appendChild(el); return el; };
+  send.addEventListener("pointerdown", () => {
+    window.__sends += 1;
+    const typed = box.value;
+    const user = item("3", '<div class="ds-message"><div class="ds-collapsible-text"><span></span></div></div>');
+    user.querySelector("span").textContent = typed;
+    box.value = "";
+    send.classList.add("ds-button--disabled");
+    setTimeout(() => {
+      if (mode === "remount") {
+        // 整列重挂载：旧回答以新节点出现在最后，用户气泡已不在；新回复迟迟不来。
+        list.innerHTML = "";
+        item("2", '<div class="ds-message"><div class="ds-markdown ds-assistant-message-main-content"><p>旧回答</p></div></div><div class="ds-flex"><div role="button" class="ds-button ds-button--iconLabelTertiary">复制</div></div>');
+        return;
+      }
+      const reply = item("4", '<div class="ds-message"><div class="ds-markdown ds-assistant-message-main-content"><p></p></div></div>');
+      send.classList.remove("ds-button--disabled");
+      send.setAttribute("tabindex", "0");
+      [...list.children].filter((el) => el !== reply).forEach((el) => el.remove());
+      const para = reply.querySelector("p");
+      const words = ["我是", "DeepSeek，", "很高兴", "认识你。"];
+      let step = 0;
+      const timer = setInterval(() => {
+        if (step < words.length) { para.textContent += words[step]; step += 1; return; }
+        clearInterval(timer);
+        send.classList.add("ds-button--disabled");
+        send.removeAttribute("tabindex");
+        reply.insertAdjacentHTML("beforeend", '<div class="ds-flex"><div role="button" class="ds-button ds-button--iconLabelTertiary">复制</div></div>');
+      }, 300);
+    }, 400);
+  });
+}"""
+
+
+@pytest.mark.parametrize("old_q", ["旧问题", "请介绍一下你自己。"])
+def test_deepseek_reply_is_read_after_virtual_list_drops_the_user_bubble(old_q):
+    with sync_playwright() as playwright:
+        browser, page = _deepseek_stream_page(playwright, DEEPSEEK_VIRTUAL_PAGE.replace("{OLD_Q}", old_q))
+        page.evaluate(VIRTUAL_SEND, ["stream"])
+        result = page.evaluate(
+            """async () => {
+              const read = await runJob({ request_id: "virtual-job", prompt: "请介绍一下你自己。", site: "deepseek", action: "run" });
+              return { status: read.status, text: read.text, detail: read.detail || "", sends: window.__sends,
+                       users: deepseekUsers(document).length };
+            }"""
+        )
+        browser.close()
+    assert result["users"] == 0  # 用户气泡确实已不在 DOM 里
+    assert result["status"] == "complete", result
+    assert result["text"] == "我是DeepSeek，很高兴认识你。"
+    assert result["sends"] == 1
+
+
+@pytest.mark.parametrize("old_q", ["旧问题", "请介绍一下你自己。"])
+def test_deepseek_never_takes_an_old_reply_when_the_user_bubble_is_gone(old_q):
+    with sync_playwright() as playwright:
+        browser, page = _deepseek_stream_page(playwright, DEEPSEEK_VIRTUAL_PAGE.replace("{OLD_Q}", old_q))
+        page.evaluate(VIRTUAL_SEND, ["remount"])
+        result = page.evaluate(
+            """async () => {
+              const prompt = "请介绍一下你自己。";
+              const sent = await deepseekDispatchSend(document, prompt, 3000);
+              const seen = [];
+              for (let i = 0; i < 12; i += 1) {
+                const node = deepseekNewReply(document, prompt);
+                seen.push(node ? deepseekText(node) : null);
+                await new Promise((r) => setTimeout(r, 150));
+              }
+              return { ok: sent.ok, sends: window.__sends, seen, assistants: deepseekAssistants(document).length };
+            }"""
+        )
+        browser.close()
+    assert result["ok"] is True
+    assert result["sends"] == 1
+    assert result["assistants"] == 1  # 页面上只有重挂载后的旧回答
+    assert result["seen"] == [None] * 12

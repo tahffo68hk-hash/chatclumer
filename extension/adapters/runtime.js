@@ -1,7 +1,16 @@
 // 注册表运行时：内置注册表 + 后台缓存的远端注册表（只是数据），页面检查和诊断导出。
 // 页面检查只查找元素，不写入、不点击；诊断导出只留聊天栏的结构，文字一律打码。
 (function () {
-  if (globalThis.ChatclumerAdapters && globalThis.ChatclumerAdapters.__ready) return;
+  var alive = false;
+  var ver = "";
+  try {
+    alive = !!(chrome.runtime && chrome.runtime.id);
+    ver = (alive && chrome.runtime.getManifest && chrome.runtime.getManifest().version) || "";
+  } catch (e) {
+    alive = false;
+  }
+  // 同一个活着的扩展实例里重复注入时不再执行：保留已启用的远端注册表，也不重复挂监听。
+  if (globalThis.ChatclumerAdapters && globalThis.ChatclumerAdapters.__ready && alive && globalThis.ChatclumerAdapters.__version === ver) return;
   const bundled = globalThis.CHATCLUMER_REGISTRY || { version: "0", sites: {}, common: {} };
   const schema = globalThis.ChatclumerRegistrySchema;
   let active = bundled;
@@ -87,6 +96,22 @@
   const CONVERSATION = ["users", "assistants", "messages", "body", "user_text"];
 
   // 页面检查（不发送）：逐个角色按顺序试选择器，报告第几个命中、命中几个。
+  // 只读：取输入框当前的文字，判断是否为空。
+  function composerEmpty(spec, scope) {
+    for (const sel of (spec.roles && spec.roles.composer) || []) {
+      let el = null;
+      try {
+        el = scope.querySelector(sel);
+      } catch {
+        el = null;
+      }
+      if (!el) continue;
+      const text = "value" in el && !el.isContentEditable ? el.value : el.innerText || el.textContent || "";
+      return !String(text || "").trim();
+    }
+    return false;
+  }
+
   function health(id, root) {
     const scope = root || document;
     const spec = site(id);
@@ -108,12 +133,21 @@
       });
       roles[role] = hit || { found: 0, index: -1, selector: "", visible: false };
     }
-    const missing = REQUIRED.filter((role) => !roles[role] || !roles[role].found);
+    let missing = REQUIRED.filter((role) => !roles[role] || !roles[role].found);
+    // 有的站点（如 Qwen）输入框为空时根本不渲染发送键。页面检查绝不写入，所以这种情况记为「要输入后才能检查」，不算失败。
+    const deferred = [];
+    const flags = spec.flags || {};
+    if (flags.send_after_input && missing.includes("send") && roles.composer && roles.composer.found && composerEmpty(spec, scope)) {
+      missing = missing.filter((role) => role !== "send");
+      deferred.push("send");
+      roles.send = { ...(roles.send || { found: 0, index: -1, selector: "" }), deferred: true };
+    }
     const empty = CONVERSATION.filter((role) => roles[role] && !roles[role].found);
     let gate = null;
     if (spec.engine === "guest" && typeof guestGate === "function") gate = guestGate(id, scope);
     const parts = [];
     if (missing.length) parts.push(`找不到：${missing.join("、")}`);
+    if (deferred.length) parts.push("发送键要在输入文字后才出现，空输入框时检查不了（不算失败，页面检查不会写入）");
     if (empty.length) parts.push(`当前页面没有：${empty.join("、")}（新会话里正常）`);
     if (gate) parts.push(`门槛：${gate}`);
     return {
@@ -121,6 +155,7 @@
       label: spec.label,
       ok: missing.length === 0 && !gate,
       missing,
+      deferred,
       empty,
       gate,
       roles,
@@ -216,7 +251,7 @@
     return { html: html.slice(0, 2 * 1024 * 1024), meta };
   }
 
-  globalThis.ChatclumerAdapters = { __ready: true, site, common, info, useRemote, health, dump, bundled: () => bundled };
+  globalThis.ChatclumerAdapters = { __ready: true, __version: ver, site, common, info, useRemote, health, dump, bundled: () => bundled };
 
   try {
     chrome.runtime.sendMessage({ type: "registry-get" }, (resp) => {
