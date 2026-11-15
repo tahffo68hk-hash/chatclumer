@@ -203,7 +203,11 @@ git status --short
 
 分组和网页桥提交后，用下面的命令核对。若其后只有记下哈希的修订，以 `git rev-parse HEAD` 为准，并确认功能提交仍是祖先。
 
-DeepSeek 与豆包适配器在：
+标点、豆包第二次写入和 DeepSeek 换地址在：
+
+`7fed594c094512cd522c13becace3f41f134c355`
+
+DeepSeek 与豆包适配器仍是祖先：
 
 `04ce11145995b54640b1ff53ab97f43a702a739f`
 
@@ -248,7 +252,7 @@ DeepSeek 与豆包适配器在：
 ```bash
 git rev-parse HEAD
 git log -1 --oneline
-git merge-base --is-ancestor 04ce11145995b54640b1ff53ab97f43a702a739f HEAD && echo ancestor-ok
+git merge-base --is-ancestor 7fed594c094512cd522c13becace3f41f134c355 HEAD && echo ancestor-ok
 git status --short
 ```
 
