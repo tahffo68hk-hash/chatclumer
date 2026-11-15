@@ -62,6 +62,7 @@ def test_deepseek_sends_once_and_reads_only_the_answer():
                 item.innerHTML = '<div class="ds-collapsible-text"><span></span></div>';
                 item.querySelector("span").textContent = box.value;
                 document.querySelector(".ds-virtual-list-visible-items").appendChild(item);
+                box.value = "";
               });
               const outcome = await deepseekDispatchSend(document, "请用一句话给一个读书建议。", 2500);
               send.setAttribute("aria-label", "Stop");
@@ -239,6 +240,7 @@ def test_doubao_sends_once_reads_body_and_detects_login_or_region_ban():
                 done: doubaoDone(node),
                 idle: doubaoSendIdle(document),
                 partial: doubaoPartial(node),
+                punct: doubaoText(Object.assign(document.createElement("div"), { innerHTML: '<div data-testid="message_text_content">你好，世界</div>' })),
                 busy,
                 source: DOUBAO_DOM_SOURCE,
               };
@@ -281,3 +283,121 @@ def test_doubao_sends_once_reads_body_and_detects_login_or_region_ban():
     assert "豆包需要登录" in gates["loginDetail"]
     assert gates["ban"] is True
     assert gates["banDetail"] == "豆包当前网络地区不可用"
+    assert sent["punct"] == "你好，世界"
+
+
+def test_doubao_second_write_uses_paste_when_insert_text_is_ignored():
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(channel="chrome", headless=True)
+        page = browser.new_page()
+        page.set_content(DOUBAO_PAGE)
+        page.add_script_tag(path=str(ROOT / "extension" / "doubao.js"))
+        result = page.evaluate(
+            """async () => {
+              const editor = document.querySelector("[contenteditable='true']");
+              let inserts = 0;
+              document.execCommand = (command, _ui, value) => {
+                if (command !== "insertText") return true;
+                inserts += 1;
+                if (inserts === 1) editor.querySelector("p").textContent = String(value || "");
+                return true;
+              };
+              editor.addEventListener("paste", (event) => {
+                const text = event.clipboardData && event.clipboardData.getData("text/plain");
+                if (text) editor.querySelector("p").textContent = text;
+              });
+              editor.addEventListener("input", () => {
+                if (!doubaoComposerText(editor) || document.querySelector("[data-testid='chat_input_send_button']")) return;
+                const button = document.createElement("button");
+                button.setAttribute("data-testid", "chat_input_send_button");
+                button.addEventListener("pointerdown", () => {
+                  const item = document.createElement("div");
+                  item.setAttribute("data-testid", "send_message");
+                  const body = document.createElement("div");
+                  body.setAttribute("data-testid", "message_text_content");
+                  body.textContent = editor.innerText;
+                  item.appendChild(body);
+                  document.querySelector("[data-testid='message-list']").appendChild(item);
+                });
+                document.querySelector(".send-btn-wrapper").appendChild(button);
+              });
+              const first = await doubaoDispatchSend(document, "短句。", 2000);
+              const editorNow = document.querySelector("[contenteditable='true']");
+              editorNow.innerHTML = "<p><br></p>";
+              const forward = "林知秋 的公开答复：【演示】你好，世界";
+              const second = await doubaoDispatchSend(document, forward, 2500);
+              return { first: first.ok, second: second.ok, inserts, kept: doubaoComposerText(document.querySelector("[contenteditable='true']") || editor) };
+            }"""
+        )
+        browser.close()
+    assert result["first"] is True
+    assert result["second"] is True
+    assert result["inserts"] >= 2
+
+
+def test_deepseek_first_send_survives_spa_navigation():
+    html = """
+    <div class="ds-virtual-list-visible-items"></div>
+    <div class="bf38813a">
+      <textarea placeholder="Message DeepSeek" name="search" rows="2"></textarea>
+      <div role="button" class="ds-button ds-button--circle">发送</div>
+    </div>
+    """
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(channel="chrome", headless=True)
+        page = browser.new_page()
+        page.route("https://chat.deepseek.com/**", lambda route: route.fulfill(status=200, content_type="text/html", body=html))
+        page.goto("https://chat.deepseek.com/")
+        page.add_script_tag(path=str(ROOT / "extension" / "deepseek.js"))
+        page.evaluate(
+            """() => {
+              window.chrome = { runtime: { id: "room", sendMessage() {}, onMessage: { addListener() {}, removeListener() {} } } };
+            }"""
+        )
+        page.add_script_tag(path=str(ROOT / "extension" / "content.js"))
+        result = page.evaluate(
+            """async () => {
+              window.__sends = 0;
+              const box = document.querySelector("textarea");
+              const proto = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value");
+              const send = document.querySelector(".ds-button--circle");
+              send.addEventListener("pointerdown", () => {
+                window.__sends += 1;
+                const typed = box.value;
+                history.pushState({}, "", "/a/chat/s/spa-1");
+                document.querySelector(".bf38813a").remove();
+                const list = document.querySelector(".ds-virtual-list-visible-items");
+                list.innerHTML = "";
+                const user = document.createElement("div");
+                user.className = "ds-message";
+                user.innerHTML = '<div class="ds-collapsible-text"><span></span></div>';
+                user.querySelector("span").textContent = typed;
+                list.appendChild(user);
+                const fresh = document.createElement("div");
+                fresh.className = "bf38813a";
+                fresh.innerHTML = '<textarea placeholder="Message DeepSeek" name="search" rows="2"></textarea><div role="button" class="ds-button ds-button--circle">发送</div>';
+                document.body.appendChild(fresh);
+                const reply = document.createElement("div");
+                reply.className = "ds-message";
+                reply.innerHTML = '<div class="ds-markdown ds-assistant-message-main-content"><p>我是 DeepSeek，你好，世界</p></div><div class="ds-flex"><div role="button" class="ds-button ds-button--iconLabelTertiary">复制</div></div>';
+                list.appendChild(reply);
+              });
+              const sent = await deepseekDispatchSend(document, "请介绍一下你自己。", 2500);
+              const read = await resumeJob({ request_id: "spa-job", prompt: "请介绍一下你自己。", site: "deepseek" });
+              return {
+                ok: sent.ok,
+                sends: window.__sends,
+                path: location.pathname,
+                text: read.text,
+                comma: (read.text || "").includes("，"),
+                task: sessionStorage.getItem("bridge-active-task"),
+              };
+            }"""
+        )
+        browser.close()
+    assert result["ok"] is True
+    assert result["sends"] == 1
+    assert result["path"] == "/a/chat/s/spa-1"
+    assert result["text"] == "我是 DeepSeek，你好，世界"
+    assert result["comma"] is True
+    assert result["task"] in {None, "null"}

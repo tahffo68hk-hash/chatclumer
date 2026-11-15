@@ -92,7 +92,7 @@ bash scripts/start.sh
 | 网页成员表单 | 来源、页面地址、绑定键、受控自动发送会写入 web-bind。卡片上可复制成员 ID 和绑定键 |
 | Qwen 网页 | 停在年龄确认，没有读到回复 |
 | ChatGPT / Claude 网页 | BLOCKED，没有绕过 |
-| DeepSeek / 豆包网页 | 扩展 0.3.0 已按 2026-11-15 08:30 的只读 DOM 接入。实页发送和读回还没有再核对。未登录不发送 |
+| DeepSeek / 豆包网页 | 豆包第一轮实页已通过。0.3.1 修正标点、第二次写入和 DeepSeek 换地址。转发与 DeepSeek 读回待再核对。关闭的成员不再派任务 |
 | Grok 网页 | 登录墙，没有当成游客 |
 
 ## 三分钟试用
@@ -107,7 +107,7 @@ bash scripts/start.sh
 
 记录里的 UTC 已换成北京时间。2026-11-14T17:30:36Z 是 2026-11-15 01:30:36 CST。清单如下。
 
-- 旧的 21 个测试仍在。本机装了 Playwright 时，`cd backend && .venv/bin/pytest -q` 是 46 passed。其中 10 条是浏览器测试。没有 Playwright 时是 36 passed, 10 skipped。skipped 不是 passed。安装见 `backend/requirements-dev.txt`。
+- 旧的 21 个测试仍在。本机装了 Playwright 时，`cd backend && .venv/bin/pytest -q` 是 49 passed。其中 12 条是浏览器测试。没有 Playwright 时是 37 passed, 12 skipped。skipped 不是 passed。安装见 `backend/requirements-dev.txt`。
 - DeepSeek 与豆包的适配器在扩展 0.3.0。来源名是成员表单里的「DeepSeek」和「豆包」。实页发送和读回还没有再核对。
 - 元宝（登录后）在 2026-11-15 07:46 用扩展 0.2.9 实页核对通过：第一轮发送并读回 A/B 的答案 1；第三轮把林知秋的公开答复转发一次，读回与页面一致。元宝用户气泡与房间任务都是 2，没有多余发送，结束后输入框是空的。游客输入仍要先登录。此前第三轮曾因换行被拆段而报 145 对 128，没有发送。
 - 浏览器：`backend/.venv/bin/python scripts/check_branch_ui.py` 通过。预览里有勾选的两人，没有未勾选的第三人；合并后能选择发给哪一组；拆分后刷新，状态不是进行中。

@@ -163,6 +163,17 @@ class MemberIn(BaseModel):
     enabled: bool = True
 
 
+class MemberPatch(BaseModel):
+    nickname: str | None = None
+    role_name: str | None = None
+    persona: str | None = None
+    provider: str | None = None
+    model_id: str | None = None
+    api_base: str | None = None
+    api_key_env: str | None = None
+    enabled: bool | None = None
+
+
 class MessageIn(BaseModel):
     content: str
     reply_to_id: str | None = None
@@ -708,17 +719,35 @@ def create_app(db_path: str | None = None, secrets_path: str | None = None, prov
             raise HTTPException(400, redact(str(exc))) from exc
 
     @app.patch("/api/members/{member_id}")
-    def patch_member(member_id: str, body: MemberIn):
+    def patch_member(member_id: str, body: MemberPatch):
         current = database.get_member(member_id)
         if not current:
             raise HTTPException(404, "找不到成员")
-        data = body.model_dump()
-        data["nickname"] = data["nickname"].strip()
-        data["model_id"] = data["model_id"].strip()
-        _check_member(data)
-        if database.nickname_taken(current["session_id"], data["nickname"], exclude=member_id):
-            raise HTTPException(409, "这个房间里已有同名成员")
-        return database.update_member(member_id, data)
+        data = body.model_dump(exclude_unset=True)
+        if not data:
+            raise HTTPException(400, "没有要修改的字段")
+        if "nickname" in data:
+            data["nickname"] = (data["nickname"] or "").strip()
+        if "model_id" in data:
+            data["model_id"] = (data["model_id"] or "").strip()
+        if set(data) - {"enabled"}:
+            merged = {
+                "nickname": data.get("nickname", current["nickname"]),
+                "role_name": data.get("role_name", current["role_name"]),
+                "persona": data.get("persona", current.get("persona") or ""),
+                "provider": data.get("provider", current["provider"]),
+                "model_id": data.get("model_id", current["model_id"]),
+                "api_base": data.get("api_base", current.get("api_base")),
+                "api_key_env": data.get("api_key_env", current.get("api_key_env")),
+                "enabled": data.get("enabled", current["enabled"]),
+            }
+            _check_member(merged)
+            nick = merged["nickname"]
+            if database.nickname_taken(current["session_id"], nick, exclude=member_id):
+                raise HTTPException(409, "这个房间里已有同名成员")
+        updated = database.update_member(member_id, data)
+        room.publish(current["session_id"], "members", database.list_members(current["session_id"]))
+        return updated
 
     @app.delete("/api/members/{member_id}")
     def remove_member(member_id: str):

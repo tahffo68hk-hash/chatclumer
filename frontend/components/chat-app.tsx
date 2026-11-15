@@ -210,6 +210,7 @@ export function ChatApp() {
   });
   const bottomRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
+  const memberEpoch = useRef(0);
 
   const loadList = useCallback(async () => {
     const rows = await api.sessions();
@@ -218,7 +219,9 @@ export function ChatApp() {
   }, []);
 
   const loadRoom = useCallback(async (id: string) => {
+    const epoch = memberEpoch.current;
     const [detail, msgs, saved] = await Promise.all([api.session(id), api.messages(id), api.highlights(id)]);
+    if (epoch !== memberEpoch.current) return;
     setSession(detail.session);
     setMembers(detail.members);
     setGroups(detail.groups || []);
@@ -305,8 +308,9 @@ export function ChatApp() {
     if (!currentId) return;
     let stop = false;
     const refreshMembers = () => {
+      const epoch = memberEpoch.current;
       api.session(currentId).then((detail) => {
-        if (!stop) setMembers(detail.members);
+        if (!stop && epoch === memberEpoch.current) setMembers(detail.members);
       }).catch(() => undefined);
     };
     refreshMembers();
@@ -503,8 +507,17 @@ export function ChatApp() {
   }
 
   async function toggleMember(member: Member, enabled: boolean) {
-    await api.patchMember(member.id, { ...member, api_base: member.api_base || null, api_key_env: member.api_key_env || null, enabled });
-    if (currentId) await loadRoom(currentId);
+    const epoch = ++memberEpoch.current;
+    setMembers((list) => list.map((item) => (item.id === member.id ? { ...item, enabled } : item)));
+    try {
+      await api.patchMember(member.id, { enabled });
+      if (currentId && epoch === memberEpoch.current) await loadRoom(currentId);
+    } catch (err) {
+      if (epoch === memberEpoch.current) {
+        setMembers((list) => list.map((item) => (item.id === member.id ? { ...item, enabled: member.enabled } : item)));
+        setError(err instanceof Error ? err.message : "成员开关没有保存");
+      }
+    }
   }
 
   async function removeMember(member: Member) {

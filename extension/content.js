@@ -358,6 +358,7 @@ async function runJob(job) {
       }
       posted = true;
       reportPhase(job, "waiting");
+      saveTask(job, "reading");
     } else {
       let send = null;
       for (let i = 0; i < 10; i += 1) {
@@ -386,6 +387,7 @@ async function runJob(job) {
     }
     result.model_label = adapter.model() || "未能核验精确 model ID";
     result.page_url = pageUrl;
+    if (result.status === "complete") clearTask(job.request_id);
     return result;
   } finally {
     chrome.runtime.onMessage.removeListener(onCancel);
@@ -410,6 +412,60 @@ function claimJob(id) {
   return true;
 }
 
+const TASK_KEY = "bridge-active-task";
+
+function saveTask(job, phase) {
+  try {
+    sessionStorage.setItem(TASK_KEY, JSON.stringify({
+      request_id: job.request_id,
+      prompt: job.prompt,
+      site: job.site,
+      phase,
+    }));
+  } catch {
+    /* 会话存储不可用时，这一页刷新后不能续读 */
+  }
+}
+
+function clearTask(id) {
+  try {
+    const raw = sessionStorage.getItem(TASK_KEY);
+    if (!raw) return;
+    const task = JSON.parse(raw);
+    if (!id || task.request_id === id) sessionStorage.removeItem(TASK_KEY);
+  } catch {
+    sessionStorage.removeItem(TASK_KEY);
+  }
+}
+
+function loadTask() {
+  try {
+    return JSON.parse(sessionStorage.getItem(TASK_KEY) || "null");
+  } catch {
+    return null;
+  }
+}
+
+async function resumeJob(job) {
+  const pageUrl = location.origin + location.pathname;
+  const site = siteFrom(location.href);
+  const adapter = adapters[site];
+  if (!adapter || site !== job.site) return { status: "error", detail: "当前页和任务站点不一致", page_url: pageUrl };
+  if (busy) return { status: "error", detail: "这个标签页正在处理上一条", page_url: pageUrl };
+  busy = true;
+  const signal = { cancelled: false };
+  try {
+    saveTask(job, "reading");
+    const result = await waitNew(adapter, [], signal, job.prompt);
+    if (result.status === "complete") clearTask(job.request_id);
+    result.model_label = adapter.model() || "未能核验精确 model ID";
+    result.page_url = pageUrl;
+    return result;
+  } finally {
+    busy = false;
+  }
+}
+
 if (!globalThis.__roomBridge) {
 globalThis.__roomBridge = true;
 const bridgeToken = {};
@@ -420,6 +476,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message && message.type === "cancel") {
     releaseComposer();
     return;
+  }
+  if (message && message.type === "resume" && message.job) {
+    resumeJob(message.job).then(sendResponse);
+    return true;
   }
   if (!message || message.type !== "run") return;
   const requestId = message.job && message.job.request_id;
@@ -440,4 +500,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   });
   return true;
 });
+const restored = loadTask();
+if (restored && restored.request_id && siteFrom(location.href) === restored.site) {
+  try {
+    chrome.runtime.sendMessage({ type: "task-alive", job: restored });
+  } catch {
+    /* 后台不在时，下一次轮询仍会按任务号续上 */
+  }
+}
 }

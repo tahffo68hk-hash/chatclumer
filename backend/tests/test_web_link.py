@@ -54,6 +54,23 @@ def test_new_web_member_waits_for_the_extension_and_rolls_back_nothing(tmp_path)
     assert dropped["web_link"] == "掉线"
 
 
+def test_disabled_member_stays_off_and_is_not_scheduled(tmp_path):
+    app = create_app(str(tmp_path / "room.db"), str(tmp_path / "secrets.json"))
+    client = TestClient(app)
+    created = client.post("/api/sessions", json={"title": "开关", "max_rounds": 3, "max_seconds": 30}).json()
+    saved = client.post(f"/api/sessions/{created['id']}/members/web", json=_web_body(nickname="元宝网页")).json()
+    assert saved["enabled"] is True
+    patched = client.patch(f"/api/members/{saved['id']}", json={"enabled": False})
+    assert patched.status_code == 200
+    assert patched.json()["enabled"] is False
+    again = client.get(f"/api/sessions/{created['id']}").json()["members"][0]
+    assert again["enabled"] is False
+    stale = dict(again)
+    stale["enabled"] = True
+    speakers, _passed = app.state.engine._select(created["id"], "run-off", [stale], 1, 1)
+    assert speakers == []
+
+
 def test_extension_tab_heartbeat_rejects_another_site(tmp_path):
     app = create_app(str(tmp_path / "room.db"), str(tmp_path / "secrets.json"))
     client = TestClient(app)

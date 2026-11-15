@@ -1,5 +1,7 @@
 const BACKEND = "http://127.0.0.1:43124";
 const seen = new Set();
+const inflight = new Map();
+const reported = new Set();
 
 async function load() {
   return chrome.storage.local.get(["pairToken", "bindings"]);
@@ -58,12 +60,41 @@ async function poll() {
       continue;
     }
     await remember(job.request_id);
+    inflight.set(binding.tabId, job);
     chrome.tabs.sendMessage(binding.tabId, { type: "run", job }, (result) => {
-      const body = result || { status: "error", detail: chrome.runtime.lastError?.message || "标签页没有响应" };
-      report(pairToken, job, body);
+      if (chrome.runtime.lastError || !result) return;
+      finishJob(pairToken, binding.tabId, job, result);
     });
   }
   await beat(pairToken, bindings);
+}
+
+function finishJob(token, tabId, job, result) {
+  if (!job || reported.has(job.request_id)) return;
+  if (result && result.detail === "这个标签页正在处理上一条") {
+    job.resumeSent = false;
+    return;
+  }
+  reported.add(job.request_id);
+  inflight.delete(tabId);
+  report(token, job, result);
+}
+
+function resumeInflight(tabId, url) {
+  const job = inflight.get(tabId);
+  if (!job || job.site !== "deepseek" || reported.has(job.request_id) || job.resumeSent) return;
+  if (url && !String(url).includes("/a/chat/s/")) return;
+  job.resumeSent = true;
+  load().then(({ pairToken }) => {
+    if (!pairToken) return;
+    chrome.tabs.sendMessage(tabId, { type: "resume", job }, (result) => {
+      if (chrome.runtime.lastError || !result) {
+        job.resumeSent = false;
+        return;
+      }
+      finishJob(pairToken, tabId, job, result);
+    });
+  });
 }
 
 async function report(token, job, result) {
@@ -125,6 +156,13 @@ async function ensureScript(origin, tabId) {
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === "task-alive" && message.job) {
+    const job = message.job;
+    for (const [tabId, active] of inflight.entries()) {
+      if (active.request_id === job.request_id) resumeInflight(tabId, "");
+    }
+    return;
+  }
   if (message?.type === "job-progress") {
     load().then(async ({ pairToken }) => {
       if (!pairToken) return;
@@ -151,6 +189,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
   return undefined;
+});
+
+chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
+  if (!inflight.has(tabId)) return;
+  const url = info.url || (tab && tab.url) || "";
+  if (info.url || info.status === "complete") resumeInflight(tabId, url);
 });
 
 chrome.storage.session.get(["seenIds"]).then(({ seenIds }) => {

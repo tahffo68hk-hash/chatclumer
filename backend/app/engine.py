@@ -865,6 +865,10 @@ class RoomEngine:
         ranked = []
         passed = []
         for index, member in enumerate(members):
+            fresh = self.db.get_member(member["id"]) if member.get("id") else None
+            if not fresh or not fresh.get("enabled"):
+                continue
+            member = fresh
             if mentioned and member["id"] not in mentioned:
                 continue
             if self._should_pass(session_id, run_token, member, version, round_no):
@@ -935,6 +939,12 @@ class RoomEngine:
     ) -> str:
         if cancel.is_set():
             return "stopped"
+        member_id = member.get("id") or ""
+        if member_id and not str(member_id).startswith("summary:"):
+            fresh = self.db.get_member(member_id)
+            if not fresh or not fresh.get("enabled"):
+                return "skip"
+            member = fresh
         if member.get("provider") == "web" and self._web_reply_failed(session_id, run_token, member["id"]):
             return "skip"
         session = self.db.get_session(session_id)

@@ -170,6 +170,7 @@ def test_web_forward_is_one_paragraph_and_capped():
     req.reply_to = {"nickname": "林知秋", "content": "【演示回复】\n建议下一位 😀\n补充"}
     text = web_forward_text(req)
     assert "\n" not in text
-    assert text.startswith("林知秋 的公开答复:")
+    assert text.startswith("林知秋 的公开答复：")
+    assert "，" in flat_forward("甲，乙")
     assert "【演示回复】 建议下一位 😀 补充" in text
     assert text.endswith("请只根据这句公开答复补充或质疑。")

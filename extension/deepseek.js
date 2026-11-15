@@ -187,38 +187,55 @@ async function deepseekDispatchSend(root, prompt, timeoutMs, shouldAbort) {
   if (!composer) return { ok: false, detail: "找不到输入框", clicked: false };
   const committed = await deepseekCommitPrompt(root, prompt, shouldAbort);
   if (!committed.ok) {
-    if (committed.detail !== "cancelled") deepseekClearComposer(composer);
+    const failed = deepseekComposer(root) || composer;
+    if (committed.detail !== "cancelled" && failed) deepseekClearComposer(failed);
     const detail = committed.detail === "cancelled" || committed.detail === "找不到输入框"
       ? committed.detail
       : `输入框内容和待发文本不一致，没有点击发送。${committed.detail}`;
     return { ok: false, detail, clicked: false };
   }
-  const before = deepseekUsers(root).length;
+  const startPath = ((root.defaultView && root.defaultView.location) || location).pathname || "";
   let clicked = false;
   while (Date.now() < deadline) {
     if (shouldAbort && shouldAbort()) {
-      if (!clicked) deepseekClearComposer(composer);
+      const live = deepseekComposer(root);
+      if (!clicked && live) deepseekClearComposer(live);
       return { ok: false, detail: "cancelled", clicked };
     }
-    const ready = deepseekMatchState(composer, prompt) === "match";
+    const live = deepseekComposer(root);
+    const ready = !!(live && deepseekMatchState(live, prompt) === "match");
     if (!clicked) {
       const send = deepseekSendUsable(root);
       if (ready && send) {
         deepseekPress(send);
         clicked = true;
       }
-    } else if (deepseekUsers(root).length > before && deepseekUserMatches(deepseekUsers(root).at(-1), prompt)) {
+    } else if (deepseekConfirmed(root, prompt, startPath)) {
       return { ok: true, clicked: true };
     }
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  const note = deepseekDiagnosis(composer, prompt);
-  const matched = deepseekMatchState(composer, prompt) === "match";
+  const live = deepseekComposer(root) || composer;
+  const note = deepseekDiagnosis(live, prompt);
+  const matched = deepseekMatchState(live, prompt) === "match";
   const detail = clicked || matched
     ? `已填入，未发送。${note}`
     : `输入框内容和待发文本不一致，没有点击发送。${note}`;
-  deepseekClearComposer(composer);
+  if (live) deepseekClearComposer(live);
   return { ok: false, detail, clicked };
+}
+
+function deepseekConfirmed(root, prompt, startPath) {
+  const live = deepseekComposer(root);
+  const cleared = !live || deepseekComposerText(live) === "";
+  const path = ((root.defaultView && root.defaultView.location) || location).pathname || "";
+  const moved = path.includes("/a/chat/s/") && path !== startPath;
+  const found = deepseekUsers(root).some((node) => deepseekUserMatches(node, prompt));
+  return cleared && (moved || found);
+}
+
+function deepseekShown(value) {
+  return String(value || "").replace(/[\u200b\u200c\u200d\ufeff]/g, "").replace(/\u00a0/g, " ").trim();
 }
 
 function deepseekText(node) {
@@ -227,7 +244,7 @@ function deepseekText(node) {
   if (!main) return "";
   const clone = main.cloneNode(true);
   clone.querySelectorAll("[data-citation-group], .ds-markdown-cite").forEach((el) => el.remove());
-  return deepseekNormalize(clone.innerText || clone.textContent || "");
+  return deepseekShown(clone.innerText || clone.textContent || "");
 }
 
 function deepseekDone(node) {

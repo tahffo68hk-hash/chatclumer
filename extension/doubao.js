@@ -153,11 +153,29 @@ function doubaoDiagnosis(composer, prompt) {
   return `${lengths}，${doubaoDiffHint(expected, actual)}`;
 }
 
-async function doubaoSettle(composer, prompt, shouldAbort) {
+function doubaoFocus(composer) {
+  if (!composer) return;
+  composer.focus();
+  doubaoPlaceCaret(composer);
+}
+
+function doubaoPaste(composer, text) {
+  doubaoFocus(composer);
+  try {
+    const data = new DataTransfer();
+    data.setData("text/plain", text);
+    composer.dispatchEvent(new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: data }));
+  } catch {
+    /* 这个浏览器不接受合成粘贴事件 */
+  }
+}
+
+async function doubaoSettle(root, prompt, shouldAbort) {
   const deadline = Date.now() + 1500;
   while (true) {
     if (shouldAbort && shouldAbort()) return "cancelled";
-    const state = doubaoMatchState(composer, prompt);
+    const composer = doubaoComposer(root);
+    const state = composer ? doubaoMatchState(composer, prompt) : "mismatch";
     if (state === "match" || state === "duplicate") return state;
     if (Date.now() >= deadline) return state;
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -165,34 +183,43 @@ async function doubaoSettle(composer, prompt, shouldAbort) {
 }
 
 async function doubaoCommitPrompt(root, prompt, shouldAbort) {
-  const composer = doubaoComposer(root);
-  if (!composer) return { ok: false, detail: "找不到输入框" };
   const text = String(prompt || "");
   const writers = [
-    () => {
-      doubaoClearComposer(composer);
-      doubaoPlaceCaret(composer);
+    (composer) => {
+      doubaoFocus(composer);
       document.execCommand("insertText", false, text);
       composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }));
     },
-    () => {
-      doubaoClearComposer(composer);
-      doubaoPlaceCaret(composer);
+    (composer) => {
+      doubaoPaste(composer, text);
+    },
+    (composer) => {
+      doubaoFocus(composer);
       const before = doubaoComposerText(composer);
       composer.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, cancelable: true, inputType: "insertText", data: text }));
-      if (doubaoComposerText(composer) === before) {
-        composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }));
+      const live = doubaoComposer(root) || composer;
+      if (doubaoComposerText(live) === before) {
+        live.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }));
       }
     },
   ];
+  let saw = null;
   for (const write of writers) {
-    write();
-    const state = await doubaoSettle(composer, text, shouldAbort);
+    let composer = doubaoComposer(root);
+    if (!composer) return { ok: false, detail: "找不到输入框" };
+    doubaoClearComposer(composer);
+    composer = doubaoComposer(root);
+    if (!composer) return { ok: false, detail: "找不到输入框" };
+    doubaoFocus(composer);
+    write(composer);
+    saw = doubaoComposer(root) || composer;
+    const state = await doubaoSettle(root, text, shouldAbort);
     if (state === "match") return { ok: true };
     if (state === "cancelled") return { ok: false, detail: "cancelled" };
-    doubaoClearComposer(composer);
+    const leftover = doubaoComposer(root);
+    if (leftover) doubaoClearComposer(leftover);
   }
-  return { ok: false, detail: doubaoDiagnosis(composer, text) };
+  return { ok: false, detail: doubaoDiagnosis(saw || doubaoComposer(root), text) };
 }
 
 function doubaoUsers(root) {
@@ -213,7 +240,8 @@ async function doubaoDispatchSend(root, prompt, timeoutMs, shouldAbort) {
   if (!composer) return { ok: false, detail: "找不到输入框", clicked: false };
   const committed = await doubaoCommitPrompt(root, prompt, shouldAbort);
   if (!committed.ok) {
-    if (committed.detail !== "cancelled") doubaoClearComposer(composer);
+    const live = doubaoComposer(root) || composer;
+    if (committed.detail !== "cancelled" && live) doubaoClearComposer(live);
     const detail = committed.detail === "cancelled" || committed.detail === "找不到输入框"
       ? committed.detail
       : `输入框内容和待发文本不一致，没有点击发送。${committed.detail}`;
@@ -226,7 +254,8 @@ async function doubaoDispatchSend(root, prompt, timeoutMs, shouldAbort) {
       if (!clicked) doubaoClearComposer(composer);
       return { ok: false, detail: "cancelled", clicked };
     }
-    const ready = doubaoMatchState(composer, prompt) === "match";
+    const live = doubaoComposer(root);
+    const ready = !!(live && doubaoMatchState(live, prompt) === "match");
     if (!clicked) {
       const send = doubaoSendUsable(root);
       if (ready && send) {
@@ -238,12 +267,13 @@ async function doubaoDispatchSend(root, prompt, timeoutMs, shouldAbort) {
     }
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  const note = doubaoDiagnosis(composer, prompt);
-  const matched = doubaoMatchState(composer, prompt) === "match";
+  const live = doubaoComposer(root) || composer;
+  const note = doubaoDiagnosis(live, prompt);
+  const matched = doubaoMatchState(live, prompt) === "match";
   const detail = clicked || matched
     ? `已填入，未发送。${note}`
     : `输入框内容和待发文本不一致，没有点击发送。${note}`;
-  doubaoClearComposer(composer);
+  if (live) doubaoClearComposer(live);
   return { ok: false, detail, clicked };
 }
 
@@ -254,10 +284,14 @@ function doubaoExcluded(el) {
   return ident.includes("search_query_result_block");
 }
 
+function doubaoShown(value) {
+  return String(value || "").replace(/[\u200b\u200c\u200d\ufeff]/g, "").replace(/\u00a0/g, " ").trim();
+}
+
 function doubaoText(node) {
   if (!node) return "";
   const blocks = [...node.querySelectorAll("[data-testid='message_text_content']")].filter((el) => !doubaoExcluded(el));
-  return doubaoNormalize(blocks.map((el) => el.innerText || el.textContent || "").join("\n"));
+  return doubaoShown(blocks.map((el) => el.innerText || el.textContent || "").join("\n"));
 }
 
 function doubaoDone(node) {
