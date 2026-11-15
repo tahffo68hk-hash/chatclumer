@@ -1,0 +1,92 @@
+# 安卓客户端：android/** 有提交时构建 APK；推送 v* tag 时也会构建。
+# tag 推送不看路径过滤（GitHub 对 tag 不评估 paths）。只在 tag 上把 APK 挂到已有的 Release，不创建 tag 或 Release。
+name: Android
+
+on:
+  push:
+    branches:
+      - "**"
+    tags:
+      - "v*"
+    paths:
+      - "android/**"
+      - ".github/workflows/android.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Android SDK
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y unzip
+          mkdir -p "$HOME/android-sdk/cmdline-tools"
+          curl -fsSL -o /tmp/cmdtools.zip https://dl.google.com/android/repository/commandlinetools-linux-15859902_latest.zip
+          unzip -q /tmp/cmdtools.zip -d /tmp/cmdtools
+          rm -rf "$HOME/android-sdk/cmdline-tools/latest"
+          mv /tmp/cmdtools/cmdline-tools "$HOME/android-sdk/cmdline-tools/latest"
+          echo "ANDROID_HOME=$HOME/android-sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$HOME/android-sdk" >> "$GITHUB_ENV"
+          yes | "$HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$HOME/android-sdk" --licenses >/dev/null || true
+          "$HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$HOME/android-sdk" --install "platforms;android-36" "build-tools;36.0.0" "platform-tools"
+
+      - name: Decode the release keystore when secrets are present
+        env:
+          CHATCLUMER_KEYSTORE_BASE64: ${{ secrets.CHATCLUMER_KEYSTORE_BASE64 }}
+          CHATCLUMER_KEYSTORE_PASSWORD: ${{ secrets.CHATCLUMER_KEYSTORE_PASSWORD }}
+          CHATCLUMER_KEY_ALIAS: ${{ secrets.CHATCLUMER_KEY_ALIAS }}
+          CHATCLUMER_KEY_PASSWORD: ${{ secrets.CHATCLUMER_KEY_PASSWORD }}
+        run: |
+          if [ -n "$CHATCLUMER_KEYSTORE_BASE64" ] && [ -n "$CHATCLUMER_KEYSTORE_PASSWORD" ] && [ -n "$CHATCLUMER_KEY_ALIAS" ]; then
+            echo "$CHATCLUMER_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/chatclumer.keystore"
+            {
+              echo "CHATCLUMER_KEYSTORE=$RUNNER_TEMP/chatclumer.keystore"
+              echo "CHATCLUMER_KEYSTORE_PASSWORD=$CHATCLUMER_KEYSTORE_PASSWORD"
+              echo "CHATCLUMER_KEY_ALIAS=$CHATCLUMER_KEY_ALIAS"
+              echo "CHATCLUMER_KEY_PASSWORD=$CHATCLUMER_KEY_PASSWORD"
+            } >> "$GITHUB_ENV"
+            echo "Using the release keystore from secrets."
+          else
+            echo "No release keystore secrets. The release APK will be signed with the debug key so it can still be installed."
+          fi
+
+      - name: Unit tests and APKs
+        working-directory: android
+        run: ./gradlew test assembleDebug assembleRelease --stacktrace
+
+      - name: Upload APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: chatclumer-android
+          path: android/app/build/outputs/apk/**/*.apk
+          if-no-files-found: error
+
+      - name: Attach the release APK to the existing GitHub Release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          apk=$(echo android/app/build/outputs/apk/release/*.apk)
+          attached=0
+          for _ in $(seq 1 20); do
+            if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+              gh release upload "$GITHUB_REF_NAME" $apk --clobber
+              attached=1
+              break
+            fi
+            sleep 30
+          done
+          if [ "$attached" -ne 1 ]; then
+            echo "Release $GITHUB_REF_NAME does not exist yet. This workflow does not create releases or tags."
+            exit 1
+          fi

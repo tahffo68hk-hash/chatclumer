@@ -109,6 +109,8 @@ python3 scripts/build_release.py --out dist
    - **iPhone / 安卓浏览器**：选「iPhone / 浏览器扫码」，用相机扫，会打开 `http://电脑IP:43123/m/pair?token=…`，配对后进入群聊。再点 Safari「分享 → 添加到主屏幕」（安卓 Chrome 是菜单里的「添加到主屏幕」），就能像 App 一样全屏打开。iPhone 从主屏幕打开时不和 Safari 共用登录状态，第一次会让你粘贴配对链接（面板里的「复制链接」）。
 4. **在外面用**：电脑和手机都装免费的 [Tailscale](https://tailscale.com/download) 并登录同一个账号，面板里会多出一个 `100.x` 地址，扫那个二维码即可。不需要也不要做端口转发或公网穿透。
 
+安卓安装包的构建、侧载和签名见 [`android/README.md`](android/README.md)。
+
 安全说明：
 
 - 手机模式下只有前端 `43123` 监听 `0.0.0.0`。后端和扩展桥 `43124` 仍只绑定 `127.0.0.1`，并且拒绝所有非回环来源。
@@ -187,6 +189,7 @@ flowchart LR
 - **前后端。** 浏览器里的页面把 `/backend` 转到本机 FastAPI。房间、成员、消息和扩展任务存在 SQLite。
 - **扩展。** 轮询回环桥，只操作已绑定的标签页。游客站的选择器和规则来自注册表：内置一份，远端一份。DeepSeek、豆包、元宝的注册表条目只供页面检查。远端注册表只有在结构合法、版本更新、选择器都能解析时才启用，任何一项不满足都继续用内置。
 - **桌面壳。** 原型，尚未在真实网站上验证。它加载同一份注册表和内容脚本，用本机回环自动配对，不读 Cookie。
+- **安卓客户端。** 手机上的 WebView，连到电脑的页面。见 [`android/README.md`](android/README.md)。
 - **页面检查。** 结果随心跳回到后端，显示在成员卡片上。
 - **API 成员。** 和网页成员共用同一套调度。云端模型要另配密钥，并且只有在 `ALLOW_PAID_PROVIDERS=1` 时，才会考虑可能计费的接口。
 
@@ -211,6 +214,7 @@ frontend/server/  前端服务器（包住 Next）：手机/局域网配对认�
 extension/        Chrome MV3 内容脚本、后台和弹窗
 extension/adapters/  适配器注册表（registry.json）、结构校验、运行时（页面检查、诊断快照）
 desktop/          Electron 桌面壳原型（复用扩展脚本和注册表，未实页验证）
+android/          安卓远程客户端（WebView）。说明见 android/README.md
 scripts/          安装、启动、停止、发布包和界面检查
 docs/             站点记录、桌面壳说明、交接和截图
 .env.example      环境变量名字，不含真实密钥
@@ -219,7 +223,7 @@ docs/             站点记录、桌面壳说明、交接和截图
 ## 测试
 
 
-手机访问：`cd frontend && npm run test:mobile`（认证层 node 单测，pytest 也会调用），`backend/tests/test_mobile_access.py`（后端和扩展桥拒绝非回环来源）。界面检查：`LAN=1 bash scripts/start.sh` 后运行 `python scripts/check_mobile_ui.py <电脑局域网IP>`，截图里二维码保持模糊。
+手机访问：`cd frontend && npm run test:mobile`（认证层 node 单测，pytest 也会调用），`backend/tests/test_mobile_access.py`（后端和扩展桥拒绝非回环来源）。界面检查：`LAN=1 bash scripts/start.sh` 后运行 `python scripts/check_mobile_ui.py <电脑局域网IP>`，截图里二维码保持模糊。安卓客户端：`cd android && ./gradlew test`，说明见 [`android/README.md`](android/README.md)。
 
 普通后端套件不安装浏览器库也能收集。`skipped` 是可选浏览器测试，不能把它算进 passed。
 
