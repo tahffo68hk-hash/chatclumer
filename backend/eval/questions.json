@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "note": "固定题集。reasoning/factual 有参考答案，按关键词命中判分；opinion 没有标准答案，按要点覆盖判分。",
+  "questions": [
+    {"id": "r1", "kind": "reasoning", "question": "一个球拍和一个球一共 1.10 元，球拍比球贵 1 元。球多少钱？", "accept": ["0.05", "5 分", "五分"], "reject": ["0.10", "1 角"]},
+    {"id": "r2", "kind": "reasoning", "question": "5 台机器 5 分钟做 5 个零件，100 台机器做 100 个零件要几分钟？", "accept": ["5 分钟", "五分钟"], "reject": ["100 分钟"]},
+    {"id": "r3", "kind": "reasoning", "question": "池塘里的睡莲每天面积翻倍，48 天盖满池塘。盖满一半要多少天？", "accept": ["47"], "reject": ["24"]},
+    {"id": "r4", "kind": "reasoning", "question": "小明比小红大 3 岁，5 年后两人年龄和是 31 岁。小红现在几岁？", "accept": ["9 岁", "9岁", "九岁"], "reject": []},
+    {"id": "f1", "kind": "factual", "question": "水在标准大气压下的沸点是多少摄氏度？", "accept": ["100"], "reject": []},
+    {"id": "f2", "kind": "factual", "question": "《红楼梦》通行本前八十回的作者是谁？", "accept": ["曹雪芹"], "reject": []},
+    {"id": "f3", "kind": "factual", "question": "光在真空中的速度大约是每秒多少公里？", "accept": ["30 万", "300000", "299792", "三十万"], "reject": []},
+    {"id": "o1", "kind": "opinion", "question": "小团队做第一版产品，先做网页版还是先做 App？", "points": ["成本", "迭代", "分发", "用户"]},
+    {"id": "o2", "kind": "opinion", "question": "大学生暑假是去实习还是自学一门技能更好？", "points": ["经验", "兴趣", "时间", "目标"]},
+    {"id": "o3", "kind": "opinion", "question": "在家办公和去办公室，哪个更适合新人？", "points": ["沟通", "学习", "效率", "自律"]}
+  ]
+}
