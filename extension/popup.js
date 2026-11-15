@@ -1,9 +1,26 @@
 const BACKEND = "http://127.0.0.1:43124";
 
-chrome.storage.local.get(["memberId", "tabKey"]).then(({ memberId, tabKey }) => {
+chrome.storage.local.get(["memberId", "tabKey", "pairToken"]).then(({ memberId, tabKey, pairToken }) => {
   if (memberId) document.getElementById("member").value = memberId;
   if (tabKey) document.getElementById("tabkey").value = tabKey;
+  if (pairToken) {
+    document.getElementById("paired").textContent = "扩展配对：已配对。令牌只留在这个浏览器里。";
+    loadMembers(pairToken);
+  } else {
+    document.getElementById("paired").textContent = "扩展配对：还没有。先在房间「设置」里生成配对码。";
+  }
 });
+
+fetch(`${BACKEND}/api/health`)
+  .then((response) => response.json())
+  .then((data) => {
+    const service = document.getElementById("service");
+    if (data.service === "multi-llm-chat-room") service.textContent = "本机服务：已打开";
+    else service.textContent = "本机服务：回应不对，这个端口上不是本项目。";
+  })
+  .catch(() => {
+    document.getElementById("service").textContent = "本机服务：打不开。先双击「启动 ChatCluster.bat」。未连接不会当成已绑定。";
+  });
 
 function rememberFields() {
   chrome.storage.local.set({
@@ -11,6 +28,39 @@ function rememberFields() {
     tabKey: document.getElementById("tabkey").value.trim(),
   });
 }
+
+async function loadMembers(token) {
+  const response = await fetch(`${BACKEND}/api/ext/members`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (response.status === 401) {
+    document.getElementById("paired").textContent = "扩展配对：已失效。请重新生成配对码。";
+    return;
+  }
+  const data = await response.json();
+  const select = document.getElementById("member-pick");
+  select.replaceChildren();
+  const members = Array.isArray(data.members) ? data.members : [];
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = members.length ? "选择要绑定的网页成员" : "房间里还没有网页成员";
+  select.appendChild(placeholder);
+  for (const member of members) {
+    const option = document.createElement("option");
+    option.value = member.id;
+    option.dataset.tabKey = member.web_tab_key || "";
+    option.textContent = `${member.nickname || ""} · ${member.session_title || ""}${member.enabled ? "" : "（已停用）"}`;
+    select.appendChild(option);
+  }
+}
+
+document.getElementById("member-pick").addEventListener("change", () => {
+  const select = document.getElementById("member-pick");
+  const option = select.options[select.selectedIndex];
+  document.getElementById("member").value = select.value;
+  document.getElementById("tabkey").value = (option && option.dataset.tabKey) || "";
+  rememberFields();
+});
 
 document.getElementById("member").addEventListener("change", rememberFields);
 document.getElementById("tabkey").addEventListener("change", rememberFields);
@@ -28,8 +78,9 @@ document.getElementById("pair").addEventListener("click", async () => {
     return;
   }
   await chrome.storage.local.set({ pairToken: data.token });
-  document.getElementById("paired").textContent = "已配对。令牌只留在这个浏览器里。";
+  document.getElementById("paired").textContent = "扩展配对：已配对。令牌只留在这个浏览器里。";
   document.getElementById("code").value = "";
+  await loadMembers(data.token);
 });
 
 const STATIC_ORIGINS = new Set(["http://127.0.0.1:43124", "https://gemini.google.com"]);
@@ -46,7 +97,7 @@ document.getElementById("bind").addEventListener("click", async () => {
   const memberId = document.getElementById("member").value.trim();
   const tabKey = document.getElementById("tabkey").value.trim();
   if (!memberId) {
-    document.getElementById("status").textContent = "先填写成员 ID";
+    document.getElementById("status").textContent = "先选择成员。未选择不会显示成已绑定。";
     return;
   }
   const { pairToken } = await chrome.storage.local.get(["pairToken"]);
@@ -62,7 +113,7 @@ document.getElementById("bind").addEventListener("click", async () => {
     return;
   }
   if (!tabKey) {
-    document.getElementById("status").textContent = "先在房间里复制这个成员的绑定键";
+    document.getElementById("status").textContent = "这个成员没有绑定键。回到房间重新添加网页成员，不要手抄一串旧键。";
     return;
   }
   if (!STATIC_ORIGINS.has(origin)) {

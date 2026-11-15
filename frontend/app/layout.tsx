@@ -4,7 +4,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "多模型群聊",
-  description: "一个共享时间线的多模型聊天房间。演示回复会标明不是真实模型。",
+  description: "在自己电脑上把已登录的网页 AI 接进同一个房间。默认不预置聊天，也不调用付费接口。",
   applicationName: "ChatCluster",
   appleWebApp: { capable: true, title: "ChatCluster", statusBarStyle: "black-translucent" },
   icons: { icon: "/icons/icon-192.png", apple: "/apple-touch-icon.png" },

@@ -484,6 +484,29 @@ def create_app(db_path: str | None = None, secrets_path: str | None = None, prov
             room.publish(session_id, "members", database.list_members(session_id))
         return result
 
+    @app.get("/api/ext/members")
+    def ext_members(request: Request, authorization: str | None = Header(None)):
+        """网页成员名单，给已经配对的扩展下拉选择。不含密钥。"""
+        _ext_same_machine(request)
+        _require_ext(authorization)
+        rows = []
+        for session in database.list_sessions():
+            for member in database.list_members(session["id"]):
+                if member.get("provider") != "web":
+                    continue
+                rows.append({
+                    "id": member["id"],
+                    "nickname": member.get("nickname") or "",
+                    "role_name": member.get("role_name") or "",
+                    "session_title": session.get("title") or "",
+                    "web_site": member.get("web_site") or "",
+                    "web_origin": member.get("web_origin") or "",
+                    "web_tab_key": member.get("web_tab_key") or "",
+                    "web_link": member.get("web_link") or "",
+                    "enabled": bool(member.get("enabled")),
+                })
+        return {"members": rows}
+
     @app.get("/api/ext/members/{member_id}")
     def ext_member(member_id: str, request: Request, authorization: str | None = Header(None)):
         _ext_same_machine(request)

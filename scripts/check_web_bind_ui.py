@@ -13,7 +13,7 @@ def main() -> None:
         page = browser.new_page(viewport={"width": 1280, "height": 800})
         page.goto(BASE, wait_until="networkidle")
         with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/api/sessions") and r.ok) as created:
-            page.get_by_role("button", name="空白群", exact=True).click()
+            page.get_by_test_id("create-room").click()
         room_id = created.value.json()["id"]
         page.get_by_test_id("session-item").first.click()
         page.get_by_role("button", name="成员", exact=True).click()

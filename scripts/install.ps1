@@ -8,7 +8,7 @@ $ErrorActionPreference = "Stop"
 try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 
 $Root = Split-Path -Parent $PSScriptRoot
-Set-Location $Root
+Set-Location -LiteralPath $Root
 $MinPython = [version]"3.10.0"
 $MinNode = [version]"20.0.0"
 
@@ -75,15 +75,12 @@ function Write-Instructions {
   Write-Host "3. 点「加载已解压的扩展程序」"
   Write-Host "4. 选择这个目录里的 extension\（发布包解压后也是 extension\）"
   Write-Host "5. 在房间「设置」里生成本机配对码，粘贴到扩展弹窗完成配对。配对码五分钟内有效，用一次即失效。"
+  Write-Host "6. 在扩展弹窗里按成员名字选择网页成员，再绑定当前标签页。不要复制成员 ID。"
   Write-Host ""
-  Write-Host "或者启动桌面壳原型（不用安装扩展，也不用抄配对码）："
-  Write-Host "  cd desktop"
-  Write-Host "  npm install"
-  Write-Host "  npm start"
-  Write-Host "桌面壳是原型，尚未在真实网站上验证。它只操作可见页面，不读取 Cookie，不绕过登录或验证码。"
-  Write-Host "打开某个站点窗口后，把窗口标题里的绑定键填进房间的网页成员。"
-  Write-Host ""
-  Write-Host "停止：powershell -NoProfile -ExecutionPolicy Bypass -File scripts\stop.ps1"
+  Write-Host "日常使用：双击「启动 ChatCluster.bat」打开，双击「停止 ChatCluster.bat」停下。手机访问请双击「手机访问.bat」。"
+  Write-Host "桌面壳是未核实的原型，不是默认入口。它只操作可见页面，不读取 Cookie，不绕过登录或验证码。"
+  Write-Host "诊断：powershell -NoProfile -ExecutionPolicy Bypass -File scripts\doctor.ps1"
+  Write-Host "诊断不会打印密钥或配对文件的内容。"
   Write-LanWarning
 }
 

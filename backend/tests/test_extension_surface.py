@@ -65,6 +65,11 @@ def test_optional_hosts_do_not_get_a_static_content_script():
     for origin in ("https://chat.qwen.ai", "https://chatgpt.com", "https://wenxin.baidu.com", "https://chat.baidu.com", "https://chatglm.cn", "https://chat.z.ai"):
         assert f"{origin}/*" in manifest["optional_host_permissions"]
         assert origin in popup
-    assert manifest["version"] == "0.5.2"
+    assert manifest["version"] == "0.6.1"
+    assert "本机服务" in popup
+    assert "选择要绑定的网页成员" in popup
+    assert "未选择不会显示成已绑定" in popup
+    popup_html = (ROOT / "extension" / "popup.html").read_text()
+    assert "选择成员" in popup_html
     assert 'url.startsWith("https://chat.baidu.com/")) return "wenxin"' in content
     assert '"https://chat.baidu.com",' in background

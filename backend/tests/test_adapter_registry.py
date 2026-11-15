@@ -46,7 +46,9 @@ def test_registry_covers_every_adapted_site():
     for site in data["sites"].values():
         assert site["roles"]["composer"] and site["roles"]["send"]
     manifest = json.loads((ROOT / "extension" / "manifest.json").read_text())
-    assert manifest["version"] == data["min_extension"]
+    have = tuple(int(part) for part in manifest["version"].split("."))
+    need = tuple(int(part) for part in data["min_extension"].split("."))
+    assert have >= need
 
 
 def test_guest_js_has_no_inline_selectors_left():

@@ -479,10 +479,17 @@ export function ChatApp() {
   }
 
   function openCreateMember() {
-    const preset = catalog.find((item) => item.provider === "demo");
+    const site = WEB_SITES.find((item) => item.id === "yuanbao") || WEB_SITES[0];
     setEditingId(null);
     setMemberError("");
-    setMemberForm({ ...emptyMember, model_id: preset?.model_id || "demo-synthesizer-v1" });
+    setMemberForm({
+      ...emptyMember,
+      provider: "web",
+      web_site: site.id,
+      web_origin: site.origin,
+      model_id: `web:${site.id}`,
+      web_tab_key: freshTabKey(site.id),
+    });
     setMemberOpen(true);
   }
 
@@ -611,15 +618,15 @@ export function ChatApp() {
               </button>
             ))}
           </div>
-          <div className="flex gap-2 px-3 py-3">
-            <Button data-testid="create-demo" size="sm" onClick={createDemo}>
-              演示群
+          <div className="flex flex-wrap gap-2 px-3 py-3">
+            <Button data-testid="create-room" size="sm" onClick={createBlank}>
+              新建房间
+            </Button>
+            <Button data-testid="create-demo" size="sm" variant="secondary" onClick={createDemo}>
+              合成演示
             </Button>
             <Button data-testid="create-branches" size="sm" variant="secondary" onClick={createBranches}>
-              独立分支
-            </Button>
-            <Button size="sm" variant="secondary" onClick={createBlank}>
-              空白群
+              合成演示分支
             </Button>
           </div>
           <ScrollArea className="min-h-0 flex-1 px-3 pb-4">
@@ -665,6 +672,7 @@ export function ChatApp() {
                     {member.provider === "web" && (
                       <div className="mt-2 space-y-1 text-[11px] text-[#e7d7c4]" data-testid="web-card">
                         <p data-testid="bind-status">{bindStatus(member)}</p>
+                        <p>在扩展弹窗里选择「{member.nickname}」绑定当前标签页。</p>
                         {member.web_health && (
                           <p
                             data-testid="web-health"
@@ -674,12 +682,15 @@ export function ChatApp() {
                             {healthLine(member.web_health)}
                           </p>
                         )}
-                        <label className="block">成员 ID
-                          <input readOnly data-testid="member-id" className="mt-1 w-full rounded bg-black/20 px-2 py-1 font-mono" value={member.id} />
-                        </label>
-                        <label className="block">绑定键
-                          <input readOnly data-testid="tab-key" className="mt-1 w-full rounded bg-black/20 px-2 py-1 font-mono" value={member.web_tab_key || ""} />
-                        </label>
+                        <details>
+                          <summary>手动复制（一般不用）</summary>
+                          <label className="block">成员 ID
+                            <input readOnly data-testid="member-id" className="mt-1 w-full rounded bg-black/20 px-2 py-1 font-mono" value={member.id} />
+                          </label>
+                          <label className="block">绑定键
+                            <input readOnly data-testid="tab-key" className="mt-1 w-full rounded bg-black/20 px-2 py-1 font-mono" value={member.web_tab_key || ""} />
+                          </label>
+                        </details>
                       </div>
                     )}
                     <div className="mt-2 flex gap-2">
@@ -798,13 +809,18 @@ export function ChatApp() {
             )}
             {!loading && !session && (
               <div className="mx-auto mt-16 max-w-md text-center">
-                <h3 className="serif text-3xl">还没有讨论</h3>
+                <h3 className="serif text-3xl">还没有房间</h3>
                 <p className="mt-3 text-sm leading-6 text-[#6b6258]">
-                  建一个演示群，三个角色共用同一个 demo 模型。他们会先各自回答，再在这一条时间线里引用对方。
+                  新建一个空白房间，再添加你自己登录过的网页成员。合成演示只用来看界面。
                 </p>
-                <Button className="mt-5" data-testid="create-demo-main" onClick={createDemo}>
-                  创建演示群
+                <Button className="mt-5" data-testid="create-room-main" onClick={createBlank}>
+                  新建房间
                 </Button>
+                <div>
+                  <Button className="mt-3" size="sm" variant="secondary" data-testid="create-demo-main" onClick={createDemo}>
+                    合成演示（不会连接真实模型，只用来看界面）
+                  </Button>
+                </div>
               </div>
             )}
             {link === "down" && (
@@ -816,7 +832,15 @@ export function ChatApp() {
             {error && /登录|验证/.test(error) && (
               <p data-testid="login-wait" className="mx-auto mb-3 max-w-3xl rounded-lg bg-[#fff1df] px-3 py-2 text-sm text-[#9a3412]">网页停在登录或验证。这一站不再自动发送。</p>
             )}
-            {session && messages.length === 0 && (
+            {session && members.length === 0 && (
+              <ol data-testid="start-checklist" className="mx-auto mt-10 max-w-lg list-decimal space-y-2 pl-5 text-sm leading-6 text-[#6b6258]">
+                <li>添加网页成员，并在那个网页里自己登录。扩展不会替你登录。</li>
+                <li>在房间「设置」里生成配对码，粘贴到扩展弹窗完成配对。</li>
+                <li>在扩展里按成员名字绑定当前标签页。未绑定不算已连接。</li>
+                <li>写下一句再发送。停止或刷新不会把上一条再发一次。</li>
+              </ol>
+            )}
+            {session && members.length > 0 && messages.length === 0 && (
               <p className="mx-auto mt-10 max-w-lg text-center text-sm leading-6 text-[#6b6258]">
                 写下一句。启用的成员会先独立回答，彼此看不到这一轮正在生成的内容；之后才能引用公开发言。
               </p>
@@ -1132,9 +1156,9 @@ export function ChatApp() {
           </DialogHeader>
           <ol className="list-decimal space-y-2 pl-4 text-sm leading-6" data-testid="connect-steps">
             <li>在设置里生成本机配对码，粘贴到扩展弹窗并点配对。令牌只留在扩展里，不会进聊天。</li>
-            <li>在成员里添加「网页会话」。选来源，填写页面地址和绑定键。需要房间代发时打开受控自动发送，然后保存。</li>
-            <li>保存后卡片是「已配置，等待扩展绑定」。扩展绑定当前标签页并保持打开，心跳到达后卡片会自己变成「已绑定标签页」，不用刷新页面。大约 20 秒没有心跳则是「掉线」。</li>
-            <li>用普通 Chrome 打开那个页面。扩展弹窗填同一组 ID 和绑定键，点绑定当前标签页。元宝、智谱等要在这时允许该站点，扩展才会装上内容脚本。</li>
+            <li>在成员里添加「网页会话」。选来源和页面地址。绑定键由房间生成，扩展按成员名字读取。</li>
+            <li>保存后卡片是「已配置，等待扩展绑定」。扩展按名字绑定当前标签页并保持打开，心跳到达后卡片会自己变成「已绑定标签页」，不用刷新页面。大约 20 秒没有心跳则是「掉线」。</li>
+            <li>用普通 Chrome 打开那个页面。在扩展弹窗里选择这个成员的名字，点绑定当前标签页。元宝、智谱等要在这时允许该站点，扩展才会装上内容脚本。</li>
             <li>夹具地址是 http://127.0.0.1:43124/fixture/chat 。Gemini 游客页可以绑定。元宝只在房间发出发送指令、且输入框容器里的 Send 可用时才点一次。智谱不会自动点击发送。</li>
           </ol>
         </DialogContent>
@@ -1143,7 +1167,7 @@ export function ChatApp() {
         <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
           <DialogHeader>
             <DialogTitle>{editingId ? "编辑成员" : "添加成员"}</DialogTitle>
-            <DialogDescription>同一个模型 ID 可以有多个角色。演示提供方不能填真实模型 ID。</DialogDescription>
+            <DialogDescription>默认是网页会话。合成演示只用来看界面，不能把模型 ID 写成真实模型名。</DialogDescription>
           </DialogHeader>
           <div className="grid gap-3">
             <Label>昵称</Label>
@@ -1228,7 +1252,7 @@ export function ChatApp() {
                   <span>受控自动发送</span>
                   <Switch data-testid="web-auto" checked={memberForm.web_auto} onCheckedChange={(value) => setMemberForm({ ...memberForm, web_auto: value })} />
                 </div>
-                <p className="text-xs text-[#6b6258]">保存后会写入这个成员的网页绑定。绑定键要原样贴进扩展弹窗。元宝和智谱可以先绑定，正文位置未核实之前房间不会自动点击发送。</p>
+                <p className="text-xs text-[#6b6258]">保存后会写入这个成员的网页绑定。绑定键由房间生成，扩展按成员名字读取。元宝和智谱可以先绑定，正文位置未核实之前房间不会自动点击发送。</p>
               </div>
             )}
           </div>
