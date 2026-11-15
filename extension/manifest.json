@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "多模型群聊网页桥",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "在你授权的标签页里读写可见聊天，并只和本机 127.0.0.1 配对。",
   "permissions": [
     "storage",

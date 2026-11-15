@@ -76,3 +76,8 @@ export const api = {
 export function eventUrl(id: string) {
   return apiUrl(`/api/sessions/${id}/events`);
 }
+
+// 事件流断开后的重连间隔：1s、2s、4s、8s，之后每 15s 一次。
+export function reconnectDelay(attempt: number) {
+  return Math.min(15000, 1000 * 2 ** Math.max(0, attempt));
+}

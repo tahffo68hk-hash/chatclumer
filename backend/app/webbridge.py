@@ -34,22 +34,22 @@ SITE_STATUS = {
         "detail": "2026-11-15 01:30 CST（2026-11-14T17:30:36Z）https://gemini.google.com/app 游客，页面显示 Flash-Lite。扩展写回两条回复。另一成员是演示模型，不是第二个网页模型。",
     },
     "qwen": {
-        "state": "guest_adapter",
-        "detail": "2026-11-15 实页：游客发送会被服务端拒绝（提示没有权限后退回首页）。扩展 0.4.2 识别这条提示并回报「千问游客发送被拒绝，可能需要登录」，清空输入框，不重发。年龄确认弹窗也只回报。",
+        "state": "guest_verified_live",
+        "detail": "2026-11-15 扩展 0.4.2 实页端到端已通过（发送、读回、转发）。若服务端提示没有权限，回报「千问游客发送被拒绝，可能需要登录」，清空输入框，不重发。年龄确认弹窗只回报，不点。",
     },
     "chatgpt": {
-        "state": "guest_adapter",
-        "detail": "2026-11-15 游客实页可聊天（未登录版式，输入框 textarea#mobile-composer-prompt，地址到 /uc/<id>）。扩展 0.4.0 接入游客自动发送，实页端到端还没有再核对。出现登录、注册或验证弹窗时只回报，不绕过。",
+        "state": "guest_gated",
+        "detail": "2026-11-15 实页：游客额度用完后页面出现「Sign in to continue」，扩展 0.4.3 在写入前识别并回报「ChatGPT 需要登录后才能继续（游客额度可能用完）」，不写入、不重试。ChatGPT 游客模式不可靠。",
     },
     "claude": {"state": "BLOCKED", "detail": "本环境早前打开 https://claude.ai/ 得到 403。没有重试，没有绕过。"},
     "deepseek": {
-        "state": "login_required",
-        "detail": "2026-11-15 协调方在已登录页面记录了输入框和回复结构。扩展 0.3.0 按该结构接入，实页发送和读回还没有再核对。停在 /sign_in 或出现登录输入框时不发送。",
+        "state": "login_verified_live",
+        "detail": "2026-11-15 扩展 0.4.2 在已登录、单独可见窗口的标签页里实页端到端已通过。标签页在后台时虚拟消息列表可能不渲染。停在 /sign_in 或出现登录输入框时不发送。",
     },
     "grok": {"state": "login_wall", "detail": "本环境早前打开 https://grok.com/ 先是登录与 Cookie 说明，没有当成游客聊天。"},
     "doubao": {
-        "state": "login_required",
-        "detail": "2026-11-15 协调方在已登录页面记录了输入框和回复结构。扩展 0.3.0 按该结构接入，实页发送和读回还没有再核对。出现登录框时不发送。地区不可用页只回报「豆包当前网络地区不可用」，不绕过。",
+        "state": "login_verified_live",
+        "detail": "2026-11-15 已登录实页发送和读回已通过（较早版本核对）。出现登录框时不发送。地区不可用页只回报「豆包当前网络地区不可用」，不绕过。",
     },
     "yuanbao": {
         "state": "guest_login_required",
@@ -57,15 +57,15 @@ SITE_STATUS = {
     },
     "zhipu": {
         "state": "guest_adapter",
-        "detail": "2026-11-15 游客实页（访客_xxxxxx）记录了输入框、发送键和回复正文位置。扩展 0.4.0 改为游客自动发送，只读最终回答，不读思考过程。实页端到端还没有再核对。",
+        "detail": "2026-11-15 0.4.2 实页报「已填入，未发送」（站点没认到写入，发送键一直带 .empty）。扩展 0.4.3 改用 execCommand('insertText') 写入、等发送键可点、点按钮中心元素；实页待再核对。只读最终回答，不读思考过程。",
     },
     "wenxin": {
         "state": "guest_adapter",
-        "detail": "2026-11-15 实页游客可聊天：https://wenxin.baidu.com/（chat.baidu.com、yiyan.baidu.com 会跳到这里，三个源算同一个绑定），发出后地址到 /search/<id>。扩展 0.4.2 的选择器取自实页 DOM，实页端到端待再核对。",
+        "detail": "2026-11-15 0.4.2 实页报「已填入，未发送」。扩展 0.4.3 改用 execCommand('insertText') 写入、点发送图标 img#ci-submit-button-ai；若页面发出的不是待发文本（例如示例提示）就停下报错。实页待再核对。wenxin.baidu.com / chat.baidu.com / yiyan.baidu.com 算同一个绑定。",
     },
     "zai": {
-        "state": "guest_adapter",
-        "detail": "2026-11-15 游客实页 https://chat.z.ai/（页头显示 Guest）可聊天，地址到 /c/<id>。扩展 0.4.0 接入游客自动发送，只读回答不读 Thought Process。实页端到端还没有再核对。",
+        "state": "guest_verified_live",
+        "detail": "2026-11-15 扩展 0.4.2 游客实页端到端已通过，地址到 /c/<id>，只读回答不读 Thought Process。",
     },
 }
 

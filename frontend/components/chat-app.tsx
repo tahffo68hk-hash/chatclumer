@@ -11,7 +11,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { RichText } from "@/components/rich-text";
-import { api, eventUrl } from "@/lib/api";
+import { api, eventUrl, reconnectDelay } from "@/lib/api";
 import type { CatalogItem, ChatMessage, HighlightCard, Member, RoomGroup, Session, SplitItem } from "@/lib/types";
 
 const MODES = [
@@ -276,32 +276,54 @@ export function ChatApp() {
 
   useEffect(() => {
     if (!currentId) return;
-    const source = new EventSource(eventUrl(currentId));
-    source.addEventListener("snapshot", (event) => {
-      const data = JSON.parse((event as MessageEvent).data);
-      setSession(data.session);
-      setMembers(data.members);
-      setMessages(data.messages);
-    });
-    source.addEventListener("session", (event) => {
-      const data = JSON.parse((event as MessageEvent).data);
-      setSession(data);
-      setSessions((rows) => rows.map((row) => (row.id === data.id ? { ...row, ...data } : row)));
-    });
-    source.addEventListener("message", (event) => {
-      const data = JSON.parse((event as MessageEvent).data) as ChatMessage;
-      setMessages((list) => upsert(list, data));
-    });
-    source.addEventListener("members", (event) => {
-      const data = JSON.parse((event as MessageEvent).data) as Member[];
-      if (Array.isArray(data)) setMembers(data);
-    });
-    source.onerror = () => {
-      setLink("down");
-      source.close();
+    // 断线后按 1s、2s、4s… 最多 15s 重连；连上后服务端先推一份 snapshot（整间房的状态），再补读一次房间，横幅随之消失。
+    let closed = false;
+    let attempt = 0;
+    let timer: number | undefined;
+    let source: EventSource | null = null;
+    const connect = () => {
+      if (closed) return;
+      const es = new EventSource(eventUrl(currentId));
+      source = es;
+      es.addEventListener("snapshot", (event) => {
+        const data = JSON.parse((event as MessageEvent).data);
+        setSession(data.session);
+        setMembers(data.members);
+        setMessages(data.messages);
+        if (attempt > 0) loadRoom(currentId).catch(() => undefined);
+        attempt = 0;
+        setLink("ok");
+      });
+      es.addEventListener("session", (event) => {
+        const data = JSON.parse((event as MessageEvent).data);
+        setSession(data);
+        setSessions((rows) => rows.map((row) => (row.id === data.id ? { ...row, ...data } : row)));
+      });
+      es.addEventListener("message", (event) => {
+        const data = JSON.parse((event as MessageEvent).data) as ChatMessage;
+        setMessages((list) => upsert(list, data));
+      });
+      es.addEventListener("members", (event) => {
+        const data = JSON.parse((event as MessageEvent).data) as Member[];
+        if (Array.isArray(data)) setMembers(data);
+      });
+      es.onerror = () => {
+        es.close();
+        if (closed || source !== es) return;
+        setLink("down");
+        const delay = reconnectDelay(attempt);
+        attempt += 1;
+        window.clearTimeout(timer);
+        timer = window.setTimeout(connect, delay);
+      };
     };
-    return () => source.close();
-  }, [currentId]);
+    connect();
+    return () => {
+      closed = true;
+      window.clearTimeout(timer);
+      source?.close();
+    };
+  }, [currentId, loadRoom]);
 
   const sessionRef = useRef(session);
   sessionRef.current = session;
@@ -750,7 +772,7 @@ export function ChatApp() {
             )}
             {link === "down" && (
               <p data-testid="link-down" className="mx-auto mb-3 max-w-3xl rounded-lg bg-[#fff1df] px-3 py-2 text-sm text-[#9a3412]">
-                和本机后端的连接断了。重新读取不会再次发送上一条。
+                和本机后端的连接断了，正在自动重连。重新读取不会再次发送上一条。
                 <Button className="ml-2" size="sm" variant="outline" data-testid="reload-room" onClick={() => currentId && loadRoom(currentId).then(() => setLink("ok")).catch((err) => setError(err.message))}>重新读取</Button>
               </p>
             )}

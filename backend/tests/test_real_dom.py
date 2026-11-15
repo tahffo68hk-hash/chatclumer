@@ -70,12 +70,17 @@ def open_page(playwright, site):
 SWAP = """([sendSel, frames, startText]) => {
   window.__sends = 0;
   window.__writes = 0;
+  window.__target = "";
   const proto = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value");
-  Object.defineProperty(HTMLTextAreaElement.prototype, "value", {
-    configurable: true,
-    get() { return proto.get.call(this); },
-    set(next) { if (next) window.__writes += 1; proto.set.call(this, next); },
-  });
+  // 写入次数 = 输入框从空变成非空的次数（execCommand 不经过 value setter，所以按 input 事件数）。
+  const prev = new WeakMap();
+  document.addEventListener("input", (event) => {
+    const el = event.target;
+    if (!(el instanceof HTMLTextAreaElement)) return;
+    const now = proto.get.call(el);
+    if (now && !prev.get(el)) window.__writes += 1;
+    prev.set(el, now);
+  }, true);
   const apply = (frame) => {
     const doc = new DOMParser().parseFromString(frame.html, "text/html");
     document.body.innerHTML = doc.body.innerHTML;
@@ -90,18 +95,21 @@ SWAP = """([sendSel, frames, startText]) => {
   document.addEventListener("pointerdown", (event) => {
     if (!event.target.closest(sendSel)) return;
     window.__sends += 1;
+    window.__target = event.target.tagName.toLowerCase() + (event.target.id ? "#" + event.target.id : "");
     frames.forEach((frame, index) => setTimeout(() => apply(frame), 300 + index * 900));
   }, true);
 }"""
 
 
-def frames_for(site, keep_text=""):
+def frames_for(site, keep_text="", swap_user=""):
     spec = SITES[site]
     out = []
     for state in ("2-streaming", "3-done"):
         url, html = load(spec["file"], state)
         if state == "3-done" and spec.get("done_url_suffix") and "cid=" not in url:
             url += spec["done_url_suffix"]
+        if swap_user:
+            html = html.replace(PROMPT, swap_user)
         out.append({"url": url, "html": html, "keep": keep_text})
     return out
 
@@ -118,7 +126,7 @@ def test_real_dom_send_is_confirmed_and_reply_is_read(site):
               const result = await runJob({ request_id: "real-" + site, prompt, site, action: "run" });
               const box = document.querySelector("textarea");
               return { status: result.status, text: result.text, detail: result.detail || "", elapsed: Date.now() - started,
-                       sends: window.__sends, writes: window.__writes, empty: !box || box.value === "" };
+                       sends: window.__sends, writes: window.__writes, target: window.__target, empty: !box || box.value === "" };
             }""",
             [site, PROMPT],
         )
@@ -130,6 +138,8 @@ def test_real_dom_send_is_confirmed_and_reply_is_read(site):
     assert result["writes"] == 1
     assert result["empty"] is True
     assert result["elapsed"] < 15000
+    if site == "wenxin":
+        assert result["target"] == "img#ci-submit-button-ai"
 
 
 def test_real_dom_composer_left_filled_after_send_is_still_confirmed_and_cleared():
@@ -211,3 +221,89 @@ def test_real_dom_chatgpt_send_button_is_the_submit_not_dictation():
         )
         browser.close()
     assert result == {"submit": True, "dictation": False}
+
+
+def test_real_dom_wenxin_and_zhipu_write_with_exec_command_first():
+    for site in ("wenxin", "zhipu"):
+        with sync_playwright() as playwright:
+            browser, page = open_page(playwright, site)
+            result = page.evaluate(
+                """async ([site, prompt]) => {
+                  const calls = [];
+                  const real = document.execCommand.bind(document);
+                  document.execCommand = (cmd, ui, value) => { calls.push(cmd); return real(cmd, ui, value); };
+                  const out = await guestCommitPrompt(site, document, prompt);
+                  return { ok: out.ok, calls, value: document.querySelector("textarea").value };
+                }""",
+                [site, PROMPT],
+            )
+            browser.close()
+        assert result == {"ok": True, "calls": ["insertText"], "value": PROMPT}, (site, result)
+
+
+def test_real_dom_zhipu_unregistered_input_is_not_clicked():
+    # 空页上没有站点脚本，发送键一直带 .empty：两种写法都试过后清空，不点击。
+    url, html = load("chatglm", "0-empty")
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(channel="chrome", headless=True)
+        page = browser.new_page()
+        page.route("**/*", lambda route: route.fulfill(status=200, content_type="text/html; charset=utf-8", body=html)
+                   if route.request.resource_type == "document" else route.abort())
+        page.goto(url, wait_until="domcontentloaded")
+        page.add_script_tag(path=str(ROOT / "extension" / "guest.js"))
+        page.evaluate(SWAP, [SITES["zhipu"]["send"], [], PROMPT])
+        result = page.evaluate(
+            """async (prompt) => {
+              const out = await guestDispatchSend("zhipu", document, prompt, 6000);
+              return { ok: out.ok, detail: out.detail || "", sends: window.__sends, writes: window.__writes,
+                       empty: document.querySelector("textarea").value === "" };
+            }""",
+            PROMPT,
+        )
+        browser.close()
+    assert result["ok"] is False
+    assert "没认到" in result["detail"]
+    assert result["sends"] == 0
+    assert result["writes"] == 2
+    assert result["empty"] is True
+
+
+def test_real_dom_wenxin_sending_other_text_stops():
+    # 文心若把示例提示当问题发出，页面上的新用户消息不是待发文本：停下报错，不再点。
+    spec = SITES["wenxin"]
+    with sync_playwright() as playwright:
+        browser, page = open_page(playwright, "wenxin")
+        page.evaluate(SWAP, [spec["send"], frames_for("wenxin", swap_user="帮我写一首关于秋天的诗"), PROMPT])
+        result = page.evaluate(
+            """async (prompt) => {
+              const out = await guestDispatchSend("wenxin", document, prompt, 10000);
+              return { ok: out.ok, detail: out.detail || "", sends: window.__sends };
+            }""",
+            PROMPT,
+        )
+        browser.close()
+    assert result["ok"] is False
+    assert "示例提示" in result["detail"]
+    assert result["sends"] == 1
+
+
+def test_real_dom_chatgpt_sign_in_card_is_reported_before_writing():
+    with sync_playwright() as playwright:
+        browser, page = open_page(playwright, "chatgpt")
+        page.evaluate(SWAP, [SITES["chatgpt"]["send"], [], PROMPT])
+        page.evaluate(
+            """() => document.body.insertAdjacentHTML("beforeend",
+              '<div class="card"><h2>Sign in to continue</h2><p>Get smarter responses.</p></div>')"""
+        )
+        result = page.evaluate(
+            """async (prompt) => {
+              const job = await runJob({ request_id: "gpt-gate", prompt, site: "chatgpt", action: "run" });
+              return { status: job.status, detail: job.detail || "", sends: window.__sends, writes: window.__writes };
+            }""",
+            PROMPT,
+        )
+        browser.close()
+    assert result["status"] == "login"
+    assert "ChatGPT 需要登录后才能继续" in result["detail"]
+    assert result["sends"] == 0
+    assert result["writes"] == 0

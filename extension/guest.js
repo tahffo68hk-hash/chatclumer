@@ -51,12 +51,19 @@ const GUEST_SITES = {
     },
     doneIn: (node) => node.hasAttribute("data-message-complete") && !node.querySelector("[aria-busy='true']"),
     convUrl: /\/(c|uc)\/[\w-]{8,}/,
+    gates: [
+      { test: /sign in to continue|log in to continue/i, where: "page", detail: "ChatGPT 需要登录后才能继续（游客额度可能用完）。扩展没有写入，也不会重试" },
+    ],
   },
   wenxin: {
     label: "文心",
     composer: "textarea#chat-textarea",
     send: "span.ci-submit-button",
+    // 文心的发送图标在空框时也是 active，没有可靠的「站点已认到文字」标记；点击落在图标上（人点到的就是它）。
     disabled: (el) => !el.querySelector("img#ci-submit-button-ai"),
+    writer: "exec",
+    guardOther: true,
+    clickInner: "img#ci-submit-button-ai",
     stopFind: (root) => {
       const icon = root.querySelector("span.ci-submit-button img.ci-submit-pause");
       return icon ? icon.closest("span.ci-submit-button") : null;
@@ -83,7 +90,15 @@ const GUEST_SITES = {
     label: "智谱清言",
     composer: "#search-input-box textarea, .input-box-inner textarea",
     send: "#search-input-box div.enter.is-main-chat, div.enter.is-main-chat",
+    // 空框时 .enter-icon-container 带 empty；站点认到文字后才去掉（实页 DOM 0-empty 与 1-typed 的差别）。
     disabled: (el) => el.classList.contains("searching") || !!el.querySelector(".enter-icon-container.empty"),
+    writer: "exec",
+    guardOther: true,
+    registered: (root) => {
+      const el = root.querySelector("#search-input-box div.enter.is-main-chat, div.enter.is-main-chat");
+      return !!el && !el.classList.contains("searching") && !el.querySelector(".enter-icon-container.empty");
+    },
+    clickCenter: true,
     stopFind: (root) => root.querySelector("div.enter.is-main-chat.searching"),
     users: ".conversation.question",
     userText: ".question-txt",
@@ -245,25 +260,116 @@ function guestDiagnosis(composer, prompt) {
   return `${lengths}，第 ${index} 字不同，待发「${sample(left)}」，实际「${sample(right)}」`;
 }
 
-async function guestCommitPrompt(site, root, prompt, shouldAbort) {
-  const composer = guestComposer(site, root);
-  if (!composer) return { ok: false, detail: "找不到输入框" };
-  const text = String(prompt || "");
-  guestClearComposer(composer);
+function guestWriteNative(composer, text) {
+  composer.focus();
   guestSetValue(composer, text);
+}
+
+function guestWriteExec(composer, text) {
+  composer.focus();
+  if (typeof composer.select === "function") composer.select();
+  const doc = composer.ownerDocument || document;
+  let done = false;
+  try {
+    done = doc.execCommand("insertText", false, text);
+  } catch {
+    done = false;
+  }
+  return done;
+}
+
+function guestWriteComposed(composer, text) {
+  composer.focus();
+  composer.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true, data: "" }));
+  const view = composer.ownerDocument.defaultView || window;
+  const proto = Object.getOwnPropertyDescriptor(view.HTMLTextAreaElement.prototype, "value");
+  if (proto && proto.set) proto.set.call(composer, text);
+  else composer.value = text;
+  composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }));
+  composer.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: text }));
+  composer.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+// 写入顺序：已在实页跑通的站（Qwen、Z.ai、ChatGPT）仍先用原生 setter；文心、智谱先用 execCommand('insertText')，
+// 它触发的 beforeinput/input 是浏览器自己发的，框架认。每次都先清空、只写一次、再按 NFKC 核对；不一致就清空换下一种。
+function guestWriters(site) {
+  const spec = guestSpec(site);
+  return spec && spec.writer === "exec"
+    ? [guestWriteExec, guestWriteComposed]
+    : [guestWriteNative, guestWriteExec];
+}
+
+async function guestSettle(site, root, composer, text, shouldAbort) {
+  const spec = guestSpec(site);
   const deadline = Date.now() + 1500;
   while (true) {
-    if (shouldAbort && shouldAbort()) return { ok: false, detail: "cancelled" };
+    if (shouldAbort && shouldAbort()) return { state: "cancelled" };
     const live = guestComposer(site, root) || composer;
     const state = guestMatchState(live, text);
-    if (state === "match") return { ok: true };
+    const registered = !spec.registered || spec.registered(root);
+    if (state === "match" && registered) return { state: "match", live };
     if (state === "duplicate" || Date.now() >= deadline) {
-      const detail = guestDiagnosis(live, text);
-      guestClearComposer(live);
-      return { ok: false, detail };
+      return { state: state === "match" ? "unregistered" : state, live };
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
+}
+
+async function guestCommitPrompt(site, root, prompt, shouldAbort) {
+  const text = String(prompt || "");
+  let last = null;
+  for (const write of guestWriters(site)) {
+    const composer = guestComposer(site, root);
+    if (!composer) return { ok: false, detail: "找不到输入框" };
+    guestClearComposer(composer);
+    write(composer, text);
+    const settled = await guestSettle(site, root, composer, text, shouldAbort);
+    if (settled.state === "cancelled") return { ok: false, detail: "cancelled" };
+    if (settled.state === "match") return { ok: true };
+    last = settled;
+    if (settled.live) guestClearComposer(settled.live);
+  }
+  if (last && last.state === "unregistered") {
+    return { ok: false, detail: "文字已写进输入框，但站点的发送键一直没有变成可点（站点没认到这次输入）" };
+  }
+  return { ok: false, detail: guestDiagnosis((last && last.live) || guestComposer(site, root), text) };
+}
+
+// 点哪里：文心点发送图标本身；智谱点发送键中心处的元素；其余站点点按钮本身。事件都会冒泡到外层按钮，仍只点一次。
+function guestClickTarget(site, send) {
+  const spec = guestSpec(site);
+  if (spec && spec.clickInner) {
+    const inner = send.querySelector(spec.clickInner);
+    if (inner) return inner;
+  }
+  if (spec && spec.clickCenter) {
+    const doc = send.ownerDocument || document;
+    const rect = send.getBoundingClientRect();
+    const hit = rect.width && rect.height ? doc.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2) : null;
+    if (hit && send.contains(hit)) return hit;
+  }
+  return send;
+}
+
+// 页面上能看见的短句（卡片、标题、提示），不含聊天消息里的文字。只给声明了 where: "page" 的门槛用。
+function guestPageTexts(site, root) {
+  const spec = guestSpec(site);
+  const doc = root.ownerDocument || root;
+  const body = doc.body;
+  if (!body) return [];
+  const skip = `${spec.users}, ${spec.assistants}, textarea, button`;
+  const out = [];
+  const walker = doc.createTreeWalker(body, 4);
+  let node = walker.nextNode();
+  while (node && out.length < 20) {
+    const text = (node.nodeValue || "").trim();
+    if (text && text.length < 160 && /sign in|log in|登录/i.test(text)) {
+      const host = node.parentElement;
+      if (host && !host.closest(skip) && guestVisible(host)) out.push(text);
+    }
+    node = walker.nextNode();
+  }
+  return out;
 }
 
 // 页面上的门槛：站点自己的提示（Qwen 无权限提示、年龄确认）、人机验证、登录或注册弹窗。
@@ -276,8 +382,9 @@ function guestGate(site, root) {
   const dialogs = read(GUEST_DIALOGS);
   const toasts = read(GUEST_TOASTS);
   const heads = read("h1, h2, h3");
+  const page = (spec.gates || []).some((gate) => gate.where === "page") ? guestPageTexts(site, root) : [];
   for (const gate of spec.gates || []) {
-    const pool = gate.where === "toast" ? toasts.concat(dialogs) : dialogs.concat(heads);
+    const pool = gate.where === "toast" ? toasts.concat(dialogs) : gate.where === "page" ? dialogs.concat(heads, page) : dialogs.concat(heads);
     if (pool.some((text) => gate.test.test(text))) return gate.detail;
   }
   const captcha = dialogs.concat(read(GUEST_CAPTCHA_BOXES));
@@ -421,10 +528,21 @@ function guestSnapshot(site, root) {
 // 1. 出现了新的、文字与待发内容相符的用户消息（按 NFKC 规范化后比较）；
 // 2. 地址换成了这个站的会话地址；
 // 3. 点击后输入框被站点清空，并且出现了新的助手消息。
+// 明显是另一段话：非空，既不含待发文本开头，也不是待发文本的前缀（防止气泡还在逐字渲染时误判）。
+function guestOtherText(text, prompt) {
+  const expected = guestNormalize(prompt);
+  if (!text || text.length < 4) return false;
+  if (text.includes(expected.slice(0, 12))) return false;
+  if (expected.startsWith(text)) return false;
+  return true;
+}
+
 function guestConfirmed(site, root, prompt, before) {
   const spec = guestSpec(site);
   const fresh = guestUsers(site, root).filter((node) => !before.users.has(node));
   if (fresh.some((node) => guestUserMatches(node, prompt, site))) return "user";
+  // 页面发出了别的文字（例如文心把输入框里的示例提示当成问题发了出去）。
+  if (spec.guardOther && fresh.some((node) => guestOtherText(guestUserText(site, node), prompt))) return "other";
   const href = guestHref(root);
   if (spec.convUrl && href !== before.href && spec.convUrl.test(href) && !spec.convUrl.test(before.href)) return "url";
   const live = guestComposer(site, root);
@@ -466,11 +584,16 @@ async function guestDispatchSend(site, root, prompt, timeoutMs, shouldAbort) {
       const ready = !!(live && guestMatchState(live, prompt) === "match");
       const send = guestSendUsable(site, root);
       if (ready && send) {
-        guestPress(send);
+        guestPress(guestClickTarget(site, send));
         clicked = true;
       }
     } else {
       const how = guestConfirmed(site, root, prompt, before);
+      if (how === "other") {
+        const left = guestComposer(site, root);
+        if (left) guestClearComposer(left);
+        return { ok: false, detail: "页面发出的内容和待发文本不一致（可能发了输入框里的示例提示），已停止，不会再试", clicked: true, gate: true };
+      }
       if (how) {
         // 已经发出。站点若没清空输入框，这里清掉，免得之后被误发第二次。
         const left = guestComposer(site, root);
@@ -483,8 +606,9 @@ async function guestDispatchSend(site, root, prompt, timeoutMs, shouldAbort) {
   const live = guestComposer(site, root);
   const note = live ? guestDiagnosis(live, prompt) : "输入框已不在";
   const matched = !!(live && guestMatchState(live, prompt) === "match");
+  const idle = !clicked && matched ? "发送键一直不可点。" : "";
   const detail = clicked || matched
-    ? `已填入，未发送。${note}`
+    ? `已填入，未发送。${idle}${note}`
     : `输入框内容和待发文本不一致，没有点击发送。${note}`;
   if (live) guestClearComposer(live);
   return { ok: false, detail, clicked };
