@@ -33,7 +33,7 @@ function Assert-PortsFree {
 }
 
 function Invoke-Step([string]$File) {
-  & powershell -NoProfile -ExecutionPolicy Bypass -File $File
+  & powershell -NoProfile -ExecutionPolicy Bypass -File $File | Out-Host
   return $LASTEXITCODE
 }
 
@@ -79,6 +79,13 @@ try {
   Write-Host "windows loop ok"
 } catch {
   Write-Host $_.Exception.Message
+  $runLogs = Join-Path $dest ".run"
+  if (Test-Path -LiteralPath $runLogs) {
+    Get-ChildItem -LiteralPath $runLogs -Filter "*.log" | ForEach-Object {
+      Write-Host "----- $($_.Name) (last 60 lines) -----"
+      Get-Content -LiteralPath $_.FullName -Tail 60 -Encoding UTF8 | ForEach-Object { Write-Host $_ }
+    }
+  }
   $stop = Join-Path $dest "scripts\stop.ps1"
   if (Test-Path -LiteralPath $stop) {
     & powershell -NoProfile -ExecutionPolicy Bypass -File $stop
