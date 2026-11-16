@@ -19,3 +19,13 @@ def test_windows_launchers_keep_the_project_directory_and_do_not_read_secrets():
     assert "set LAN=1" in phone
     assert '$frontHost = "127.0.0.1"' in start
     assert '"--host","127.0.0.1"' in start
+    assert "AddSeconds(150)" in start
+    loop = (ROOT / "scripts" / "windows_loop.ps1").read_text(encoding="utf-8")
+    ui = (ROOT / "frontend" / "components" / "chat-app.tsx").read_text(encoding="utf-8")
+    assert "[char]0x6D4B" in loop
+    assert "scripts\\install.ps1" in loop
+    assert "second start should refuse busy ports" in loop
+    assert "backend\\data" in loop
+    assert "create-demo-main" not in ui
+    assert 'data-testid="demo-tools"' in ui
+    assert "开发用假回复（不连接模型）" in ui

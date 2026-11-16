@@ -64,7 +64,7 @@ Set-Content -Path (Join-Path $runDir "backend.pid") -Value $backend.Id
 $frontend = Start-Process -FilePath (Get-Command node).Source -ArgumentList $serverJs,"--dev","-H",$frontHost,"-p","43123" -WorkingDirectory $frontDir -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $runDir "frontend.log") -RedirectStandardError (Join-Path $runDir "frontend.err.log")
 Set-Content -Path (Join-Path $runDir "frontend.pid") -Value $frontend.Id
 Remove-Item Env:CHAT_ROOM_RUN
-$deadline = (Get-Date).AddSeconds(40)
+$deadline = (Get-Date).AddSeconds(150)
 do {
   $backPid = Get-ListenerPid 43124
   $frontPid = Get-ListenerPid 43123

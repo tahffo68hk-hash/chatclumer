@@ -56,13 +56,34 @@ def build_summary(transcript: list[dict], end_reason: str | None, note: str = ""
         key = message.get("member_id") or message.get("nickname") or message.get("id")
         latest[str(key)] = message
 
-    conclusions = []
-    for message in latest.values():
-        conclusions.append(
-            f"- {message.get('nickname') or '成员'}（{message.get('role_name') or '角色'} / {message.get('provider') or '-'} / {message.get('model_id') or '-'}）：{_first_sentence(message.get('content') or '')}"
-        )
-    if not conclusions:
-        conclusions = ["- 没有可回顾的成员公开发言。"]
+    if not ais:
+        header = "【本地回顾 · 未额外请求模型】没有成员发言。这里只记录结束原因，不编造共识或建议。"
+        if note:
+            header = note.strip() + "\n" + header
+        lines = [
+            header,
+            f"结束原因：{reason_label(end_reason) or '未记录'}",
+            "",
+            "## 主要结论",
+            f"用户问题：{question}",
+            "- 没有可回顾的成员公开发言。",
+            "",
+            "## 共识",
+            "- 没有成员发言，这里不写共识。",
+            "",
+            "## 分歧",
+            "- 没有成员发言，这里不写分歧。",
+            "",
+            "## 未验证事实",
+            "- 没有成员发言可核查。",
+            "",
+            "## 最推荐建议",
+            "- 没有成员建议。",
+            "",
+            "## 下一步行动",
+            "- 添加网页成员，并在扩展里绑定当前标签页后再发送。未绑定不会发送。",
+        ]
+        return "\n".join(lines) + "\n"
 
     agree: list[str] = []
     disagree: list[str] = []
@@ -79,6 +100,14 @@ def build_summary(transcript: list[dict], end_reason: str | None, note: str = ""
                 recommend.append(f"- {nick}：{sentence}")
             if any(word in sentence for word in _AGREE):
                 agree.append(f"- {nick}：{sentence}")
+
+    conclusions = []
+    for message in latest.values():
+        conclusions.append(
+            f"- {message.get('nickname') or '成员'}（{message.get('role_name') or '角色'} / {message.get('provider') or '-'} / {message.get('model_id') or '-'}）：{_first_sentence(message.get('content') or '')}"
+        )
+    if not conclusions:
+        conclusions = ["- 没有可回顾的成员公开发言。"]
 
     if not agree:
         agree = ["- 各成员回应了同一问题，但没有人明确宣布共识。这里不强行统一。"]

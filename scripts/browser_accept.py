@@ -48,6 +48,8 @@ def main() -> int:
             )
             page.get_by_test_id("send-button").click()
 
+        if not page.get_by_test_id("create-demo").is_visible():
+            page.get_by_test_id("demo-tools").locator("summary").click()
         page.get_by_test_id("create-demo").click()
         page.locator("h2", has_text="未命名群聊").wait_for()
         sid = api("GET", "/api/sessions")[0]["id"]
@@ -76,6 +78,8 @@ def main() -> int:
         page.screenshot(path=f"{OUT}/stopped-no-new-messages.png")
         notes.append(f"stop ok messages={later} reason={detail['end_reason']}")
 
+        if not page.get_by_test_id("create-demo").is_visible():
+            page.get_by_test_id("demo-tools").locator("summary").click()
         page.get_by_test_id("create-demo").click()
         page.locator("h2", has_text="未命名群聊").wait_for()
         sid = api("GET", "/api/sessions")[0]["id"]
@@ -98,6 +102,8 @@ def main() -> int:
         page.get_by_test_id("status-pill").filter(has_text="已停止").wait_for(timeout=10000)
         notes.append("pause/resume ok")
 
+        if not page.get_by_test_id("create-demo").is_visible():
+            page.get_by_test_id("demo-tools").locator("summary").click()
         page.get_by_test_id("create-demo").click()
         page.locator("h2", has_text="未命名群聊").wait_for()
         commit("@周衡 只由你回答一个更小的下一步。")

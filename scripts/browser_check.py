@@ -41,6 +41,8 @@ def main() -> int:
                 timeout=15000,
             )
 
+        if not page.get_by_test_id("create-demo").is_visible():
+            page.get_by_test_id("demo-tools").locator("summary").click()
         page.get_by_test_id("create-demo").click()
         page.locator("h2", has_text="未命名群聊").wait_for()
         commit("我们现在该不该把内部评审做成多模型群聊，而不是并排比较？")

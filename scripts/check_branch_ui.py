@@ -13,6 +13,8 @@ def main() -> None:
         browser = playwright.chromium.launch(channel="chrome", headless=True)
         page = browser.new_page(viewport={"width": 1280, "height": 860})
         page.goto("http://127.0.0.1:43123", wait_until="networkidle")
+        if not page.get_by_test_id("create-branches").is_visible():
+            page.get_by_test_id("demo-tools").locator("summary").click()
         page.get_by_test_id("create-branches").click()
         page.get_by_test_id("branch-bar").wait_for()
         page.get_by_test_id("message-input").fill("请用一句话分别给出一条读书建议")

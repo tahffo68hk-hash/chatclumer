@@ -22,11 +22,15 @@ def main() -> None:
                 route.continue_()
 
         page.goto("http://127.0.0.1:43123", wait_until="domcontentloaded")
+        if not page.get_by_test_id("create-demo").is_visible():
+            page.get_by_test_id("demo-tools").locator("summary").click()
         page.get_by_test_id("create-demo").click()
         page.get_by_test_id("message-input").wait_for()
         page.wait_for_timeout(800)
         # 新开一间房，让它的事件流从被掐断开始。
         page.route("**/api/sessions/*/events", handle)
+        if not page.get_by_test_id("create-demo").is_visible():
+            page.get_by_test_id("demo-tools").locator("summary").click()
         page.get_by_test_id("create-demo").click()
         page.get_by_test_id("link-down").wait_for(timeout=10000)
         page.get_by_test_id("link-down").wait_for(state="detached", timeout=20000)

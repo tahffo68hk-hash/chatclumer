@@ -491,6 +491,17 @@ async def test_summary_stays_local_when_stopped_or_unbudgeted_or_unkeyed(tmp_pat
     assert "伪装" in report["content"]
 
 
+def test_summary_without_replies_does_not_invent_a_discussion():
+    text = build_summary(
+        [{"author_type": "user", "content": "这句不该引出假回复", "status": "complete"}],
+        "no_members",
+    )
+    assert "各成员回应了" not in text
+    assert "可观察的小实验" not in text
+    assert "没有可回顾的成员公开发言" in text
+    assert "没有可发言的成员" in text
+
+
 def test_summary_mentions_disagreement():
     text = build_summary(
         [

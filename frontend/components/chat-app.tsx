@@ -618,16 +618,22 @@ export function ChatApp() {
               </button>
             ))}
           </div>
-          <div className="flex flex-wrap gap-2 px-3 py-3">
+          <div className="px-3 py-3">
             <Button data-testid="create-room" size="sm" onClick={createBlank}>
               新建房间
             </Button>
-            <Button data-testid="create-demo" size="sm" variant="secondary" onClick={createDemo}>
-              合成演示
-            </Button>
-            <Button data-testid="create-branches" size="sm" variant="secondary" onClick={createBranches}>
-              合成演示分支
-            </Button>
+            <details data-testid="demo-tools" className="mt-3 text-xs text-[#d9cbb8]">
+              <summary>开发用假回复（不连接模型）</summary>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Button data-testid="create-demo" size="sm" variant="secondary" onClick={createDemo}>
+                  合成演示
+                </Button>
+                <Button data-testid="create-branches" size="sm" variant="secondary" onClick={createBranches}>
+                  合成演示分支
+                </Button>
+              </div>
+              <p className="mt-2">这里生成的成员和回复都是夹具，不是网页 AI，也不会变成真实模型。</p>
+            </details>
           </div>
           <ScrollArea className="min-h-0 flex-1 px-3 pb-4">
             {sideTab !== "members" &&
@@ -811,16 +817,11 @@ export function ChatApp() {
               <div className="mx-auto mt-16 max-w-md text-center">
                 <h3 className="serif text-3xl">还没有房间</h3>
                 <p className="mt-3 text-sm leading-6 text-[#6b6258]">
-                  新建一个空白房间，再添加你自己登录过的网页成员。合成演示只用来看界面。
+                  新建一个空房间，再添加你自己登录过的网页成员。这个页面不会创建假成员或假回复。
                 </p>
                 <Button className="mt-5" data-testid="create-room-main" onClick={createBlank}>
                   新建房间
                 </Button>
-                <div>
-                  <Button className="mt-3" size="sm" variant="secondary" data-testid="create-demo-main" onClick={createDemo}>
-                    合成演示（不会连接真实模型，只用来看界面）
-                  </Button>
-                </div>
               </div>
             )}
             {link === "down" && (
