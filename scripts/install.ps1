@@ -1,4 +1,4 @@
-# 一键安装并启动。Windows。不需要管理员，不写密钥，不静默安装系统包。
+﻿# 一键安装并启动。Windows。不需要管理员，不写密钥，不静默安装系统包。
 # 依赖装好后调用 scripts/start.ps1，不另起一套进程管理。
 # 预演：powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install.ps1 -DryRun
 param(

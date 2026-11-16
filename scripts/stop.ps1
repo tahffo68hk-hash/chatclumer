@@ -1,4 +1,4 @@
-# 只结束 scripts/start.ps1 记下的进程树。不按端口结束其他服务。
+﻿# 只结束 scripts/start.ps1 记下的进程树。不按端口结束其他服务。
 $ErrorActionPreference = "Stop"
 Set-Location (Split-Path -Parent $PSScriptRoot)
 function Stop-Tree([int]$ProcessId) {

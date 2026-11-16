@@ -1,4 +1,4 @@
-# 在带空格和非 ASCII 字符的临时目录里真正安装、启动、复查、停止。
+﻿# 在带空格和非 ASCII 字符的临时目录里真正安装、启动、复查、停止。
 # 只删除这个临时副本。不读取、不打印密钥或配对材料。
 $ErrorActionPreference = "Stop"
 try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}

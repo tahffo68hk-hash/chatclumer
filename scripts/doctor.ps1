@@ -1,4 +1,4 @@
-# UTF-8。只报告有或没有。不读取密钥、配对码或令牌文件的内容。
+﻿# UTF-8。只报告有或没有。不读取密钥、配对码或令牌文件的内容。
 $ErrorActionPreference = "Continue"
 try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 $Root = Split-Path -Parent $PSScriptRoot
