@@ -32,19 +32,6 @@ ALLOWED_SECRET_NAMES = (
 
 ALLOW_PAID_NAME = "ALLOW_PAID_PROVIDERS"
 
-# 去掉继承来的权限，只留当前用户。路径从环境变量读，避免进命令行。
-_WINDOWS_RESTRICT = r"""
-$ErrorActionPreference = 'Stop'
-$path = $env:CHAT_ROOM_PRIVATE_FILE
-$acl = Get-Acl -LiteralPath $path
-$acl.SetAccessRuleProtection($true, $false)
-foreach ($rule in @($acl.Access)) { [void]$acl.RemoveAccessRule($rule) }
-$me = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
-$rule = New-Object System.Security.AccessControl.FileSystemAccessRule($me, 'Modify', 'Allow')
-[void]$acl.AddAccessRule($rule)
-Set-Acl -LiteralPath $path -AclObject $acl
-"""
-
 _WINDOWS_CHECK = r"""
 $ErrorActionPreference = 'Stop'
 $path = $env:CHAT_ROOM_PRIVATE_FILE
@@ -71,14 +58,36 @@ def _powershell(script: str, path: Path) -> subprocess.CompletedProcess:
     )
 
 
+_CURRENT_SID: str | None = None
+
+
+def _current_user_sid() -> str:
+    """当前 Windows 用户的 SID，用 whoami 读取并缓存。"""
+    global _CURRENT_SID
+    if _CURRENT_SID is None:
+        out = subprocess.run(
+            ["whoami", "/user", "/fo", "csv", "/nh"], capture_output=True, text=True, encoding="utf-8", errors="replace", check=False
+        )
+        sid = out.stdout.strip().rsplit(",", 1)[-1].strip().strip('"') if out.returncode == 0 else ""
+        if not sid.startswith("S-"):
+            raise OSError("没有收紧密钥文件权限：读不到当前用户")
+        _CURRENT_SID = sid
+    return _CURRENT_SID
+
+
 def protect_private_file(path: Path) -> None:
-    """POSIX 用 0600。Windows 的 chmod 不改变 ACL，所以改成只允许当前用户修改。"""
+    """POSIX 用 0600。Windows 的 chmod 不改变 ACL，所以用 icacls 去掉继承权限、只留当前用户修改权限。"""
     if os.name != "nt":
         os.chmod(path, 0o600)
         return
-    result = _powershell(_WINDOWS_RESTRICT, path)
+    sid = _current_user_sid()
+    result = subprocess.run(
+        ["icacls", str(path), "/inheritance:r", "/grant:r", f"*{sid}:(M)"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
+    )
     if result.returncode != 0:
-        raise OSError("没有收紧密钥文件权限")
+        # 只给出 icacls 的退出码，不带文件内容
+        raise OSError(f"没有收紧密钥文件权限（icacls 退出码 {result.returncode}）")
 
 
 def private_file_is_owner_only(path: Path) -> bool:

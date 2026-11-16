@@ -13,18 +13,6 @@ const PUBLIC_PREFIXES = ["/icons/"];
 const LOCAL_ONLY = new Set(["/m/info", "/m/rotate"]);
 const STRIP_HEADERS = ["x-forwarded-for", "x-forwarded-host", "x-forwarded-proto", "x-forwarded-port", "x-real-ip", "forwarded"];
 
-const WINDOWS_RESTRICT = `
-$ErrorActionPreference = 'Stop'
-$path = $env:CHAT_ROOM_PRIVATE_FILE
-$acl = Get-Acl -LiteralPath $path
-$acl.SetAccessRuleProtection($true, $false)
-foreach ($rule in @($acl.Access)) { [void]$acl.RemoveAccessRule($rule) }
-$me = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
-$rule = New-Object System.Security.AccessControl.FileSystemAccessRule($me, 'Modify', 'Allow')
-[void]$acl.AddAccessRule($rule)
-Set-Acl -LiteralPath $path -AclObject $acl
-`;
-
 const WINDOWS_CHECK = `
 $ErrorActionPreference = 'Stop'
 $path = $env:CHAT_ROOM_PRIVATE_FILE
@@ -47,13 +35,24 @@ function powershell(script, file) {
   );
 }
 
+let currentSid = null;
+function currentUserSid() {
+  if (currentSid) return currentSid;
+  const out = spawnSync("whoami", ["/user", "/fo", "csv", "/nh"], { encoding: "utf8" });
+  const sid = out.status === 0 ? String(out.stdout).trim().split(",").pop().trim().replace(/^"|"$/g, "") : "";
+  if (!sid.startsWith("S-")) throw new Error("没有收紧本机口令文件的权限：读不到当前用户");
+  currentSid = sid;
+  return sid;
+}
+
 export function protectPrivateFile(file) {
   if (process.platform !== "win32") {
     fs.chmodSync(file, 0o600);
     return;
   }
-  const result = powershell(WINDOWS_RESTRICT, file);
-  if (result.status !== 0) throw new Error("没有收紧本机口令文件的权限");
+  // icacls 去掉继承权限，只留当前用户的修改权限
+  const result = spawnSync("icacls", [file, "/inheritance:r", "/grant:r", `*${currentUserSid()}:(M)`], { encoding: "utf8" });
+  if (result.status !== 0) throw new Error(`没有收紧本机口令文件的权限（icacls 退出码 ${result.status}）`);
 }
 
 export function fileIsOwnerOnly(file) {
