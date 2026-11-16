@@ -51,10 +51,14 @@ export function fileIsOwnerOnly(file) {
   if (process.platform !== "win32") return (fs.statSync(file).mode & 0o077) === 0;
   const sddl = windowsDaclSddl(file);
   if (!sddl.startsWith("D:P")) return false;
-  const aces = [...sddl.matchAll(/\(([^)]*)\)/g)].map((m) => m[1]);
-  if (aces.length !== 1) return false;
-  const parts = aces[0].split(";");
-  return parts.length >= 6 && parts[0] === "A" && !parts[1].includes("ID") && parts[5] === currentUserSid();
+  const sid = currentUserSid();
+  const me = new Set([sid, ...(sid.endsWith("-500") ? ["LA"] : [])]);
+  // SYSTEM、管理员组、OWNER RIGHTS 本来就能读本机任何文件，允许保留；其他账户一律不行
+  const privileged = new Set(["SY", "BA", "OW", "S-1-5-18", "S-1-5-32-544", "S-1-3-4"]);
+  const aces = [...sddl.matchAll(/\(([^)]*)\)/g)].map((m) => m[1].split(";"));
+  if (!aces.length || aces.some((a) => a.length < 6 || a[0] !== "A" || a[1].includes("ID"))) return false;
+  const trustees = new Set(aces.map((a) => a[5]));
+  return [...trustees].some((t) => me.has(t)) && [...trustees].every((t) => me.has(t) || privileged.has(t));
 }
 
 export function normalizeIp(addr) {

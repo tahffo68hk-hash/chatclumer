@@ -89,11 +89,15 @@ def private_file_is_owner_only(path: Path) -> bool:
     sddl = _windows_dacl_sddl(path)
     if not sddl.startswith("D:P"):  # 继承已关闭
         return False
-    aces = re.findall(r"\(([^)]*)\)", sddl)
-    if len(aces) != 1:
+    sid = _current_user_sid()
+    me = {sid} | ({"LA"} if sid.endswith("-500") else set())
+    # SYSTEM、管理员组、OWNER RIGHTS 本来就能读本机任何文件，允许保留；其他账户一律不行
+    privileged = {"SY", "BA", "OW", "S-1-5-18", "S-1-5-32-544", "S-1-3-4"}
+    aces = [a.split(";") for a in re.findall(r"\(([^)]*)\)", sddl)]
+    if not aces or any(len(a) < 6 or a[0] != "A" or "ID" in a[1] for a in aces):
         return False
-    parts = aces[0].split(";")
-    return len(parts) >= 6 and parts[0] == "A" and "ID" not in parts[1] and parts[5] == _current_user_sid()
+    trustees = {a[5] for a in aces}
+    return bool(trustees & me) and trustees <= me | privileged
 
 
 class SecretStore:
