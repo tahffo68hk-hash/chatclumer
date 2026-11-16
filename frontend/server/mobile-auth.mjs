@@ -13,28 +13,6 @@ const PUBLIC_PREFIXES = ["/icons/"];
 const LOCAL_ONLY = new Set(["/m/info", "/m/rotate"]);
 const STRIP_HEADERS = ["x-forwarded-for", "x-forwarded-host", "x-forwarded-proto", "x-forwarded-port", "x-real-ip", "forwarded"];
 
-const WINDOWS_CHECK = `
-$ErrorActionPreference = 'Stop'
-$path = $env:CHAT_ROOM_PRIVATE_FILE
-$acl = Get-Acl -LiteralPath $path
-if (-not $acl.AreAccessRulesProtected) { exit 2 }
-$me = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-$rules = @($acl.Access)
-if ($rules.Count -ne 1) { exit 3 }
-$sid = $rules[0].IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value
-if ($sid -ne $me) { exit 4 }
-if ([string]$rules[0].AccessControlType -ne 'Allow') { exit 5 }
-exit 0
-`;
-
-function powershell(script, file) {
-  return spawnSync(
-    "powershell",
-    ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
-    { env: { ...process.env, CHAT_ROOM_PRIVATE_FILE: file } },
-  );
-}
-
 let currentSid = null;
 function currentUserSid() {
   if (currentSid) return currentSid;
@@ -55,9 +33,28 @@ export function protectPrivateFile(file) {
   if (result.status !== 0) throw new Error(`没有收紧本机口令文件的权限（icacls 退出码 ${result.status}）`);
 }
 
+function windowsDaclSddl(file) {
+  // icacls /save 输出 UTF-16 的 SDDL，里面是 SID，不受系统语言影响
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cc-acl-"));
+  try {
+    const dump = path.join(dir, "acl.txt");
+    const out = spawnSync("icacls", [file, "/save", dump]);
+    if (out.status !== 0 || !fs.existsSync(dump)) return "";
+    const text = fs.readFileSync(dump).toString("utf16le").replace(/^\uFEFF/, "");
+    return text.split(/\r?\n/).map((l) => l.trim()).find((l) => l.startsWith("D:")) || "";
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 export function fileIsOwnerOnly(file) {
   if (process.platform !== "win32") return (fs.statSync(file).mode & 0o077) === 0;
-  return powershell(WINDOWS_CHECK, file).status === 0;
+  const sddl = windowsDaclSddl(file);
+  if (!sddl.startsWith("D:P")) return false;
+  const aces = [...sddl.matchAll(/\(([^)]*)\)/g)].map((m) => m[1]);
+  if (aces.length !== 1) return false;
+  const parts = aces[0].split(";");
+  return parts.length >= 6 && parts[0] === "A" && !parts[1].includes("ID") && parts[5] === currentUserSid();
 }
 
 export function normalizeIp(addr) {

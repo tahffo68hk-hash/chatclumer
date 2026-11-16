@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -31,32 +32,6 @@ ALLOWED_SECRET_NAMES = (
 )
 
 ALLOW_PAID_NAME = "ALLOW_PAID_PROVIDERS"
-
-_WINDOWS_CHECK = r"""
-$ErrorActionPreference = 'Stop'
-$path = $env:CHAT_ROOM_PRIVATE_FILE
-$acl = Get-Acl -LiteralPath $path
-if (-not $acl.AreAccessRulesProtected) { exit 2 }
-$me = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-$rules = @($acl.Access)
-if ($rules.Count -ne 1) { exit 3 }
-$sid = $rules[0].IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value
-if ($sid -ne $me) { exit 4 }
-if ([string]$rules[0].AccessControlType -ne 'Allow') { exit 5 }
-exit 0
-"""
-
-
-def _powershell(script: str, path: Path) -> subprocess.CompletedProcess:
-    env = os.environ.copy()
-    env["CHAT_ROOM_PRIVATE_FILE"] = str(path)
-    return subprocess.run(
-        ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
-        capture_output=True,
-        env=env,
-        check=False,
-    )
-
 
 _CURRENT_SID: str | None = None
 
@@ -90,10 +65,35 @@ def protect_private_file(path: Path) -> None:
         raise OSError(f"没有收紧密钥文件权限（icacls 退出码 {result.returncode}）")
 
 
+def _windows_dacl_sddl(path: Path) -> str:
+    """用 icacls /save 读出文件 DACL 的 SDDL（带 SID，不受系统语言影响）。"""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as d:
+        dump = Path(d) / "acl.txt"
+        out = subprocess.run(["icacls", str(path), "/save", str(dump)], capture_output=True, check=False)
+        if out.returncode != 0 or not dump.exists():
+            return ""
+        raw = dump.read_bytes()
+    text = raw.decode("utf-16") if raw[:2] in (b"\xff\xfe", b"\xfe\xff") else raw.decode("utf-16-le", errors="replace")
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("D:"):
+            return line
+    return ""
+
+
 def private_file_is_owner_only(path: Path) -> bool:
     if os.name != "nt":
         return (path.stat().st_mode & 0o777) == 0o600
-    return _powershell(_WINDOWS_CHECK, path).returncode == 0
+    sddl = _windows_dacl_sddl(path)
+    if not sddl.startswith("D:P"):  # 继承已关闭
+        return False
+    aces = re.findall(r"\(([^)]*)\)", sddl)
+    if len(aces) != 1:
+        return False
+    parts = aces[0].split(";")
+    return len(parts) >= 6 and parts[0] == "A" and "ID" not in parts[1] and parts[5] == _current_user_sid()
 
 
 class SecretStore:
