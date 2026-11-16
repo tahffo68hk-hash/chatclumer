@@ -3,7 +3,9 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main]
+    branches:
+      - main
+      - cursor/windows-usable-3278
 
 permissions:
   contents: read
@@ -48,6 +50,7 @@ jobs:
 
   windows:
     runs-on: windows-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -60,10 +63,9 @@ jobs:
         run: |
           python -m pip install -r backend/requirements.txt
           python -m pytest backend/tests -q
-      - name: Installer dry run
+      - name: Install, start, health, refuse a second start, stop, restart
         shell: pwsh
         run: |
           $OutputEncoding = [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1 -DryRun
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/windows_loop.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/doctor.ps1
