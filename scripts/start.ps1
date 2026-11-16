@@ -59,9 +59,15 @@ $token = [guid]::NewGuid().ToString("N")
 Set-Content -Path (Join-Path $runDir "instance.token") -Value $token -NoNewline
 $env:CHAT_ROOM_RUN = $token
 $serverJs = Join-Path $frontDir "server\index.mjs"
-$backend = Start-Process -FilePath $uvicorn -ArgumentList "app.main:app","--app-dir",$backendDir,"--host","127.0.0.1","--port","43124" -WorkingDirectory $Root -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $runDir "backend.log") -RedirectStandardError (Join-Path $runDir "backend.err.log")
+# Start-Process 把 -ArgumentList 拼成一条命令行且不加引号，路径里有空格时要自己加。
+function Quote-Arg([string]$Value) {
+  if ($Value -match '[\s"]') { return '"' + ($Value -replace '"', '\"') + '"' }
+  return $Value
+}
+
+$backend = Start-Process -FilePath $uvicorn -ArgumentList "app.main:app","--app-dir",(Quote-Arg $backendDir),"--host","127.0.0.1","--port","43124" -WorkingDirectory $Root -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $runDir "backend.log") -RedirectStandardError (Join-Path $runDir "backend.err.log")
 Set-Content -Path (Join-Path $runDir "backend.pid") -Value $backend.Id
-$frontend = Start-Process -FilePath (Get-Command node).Source -ArgumentList $serverJs,"--dev","-H",$frontHost,"-p","43123" -WorkingDirectory $frontDir -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $runDir "frontend.log") -RedirectStandardError (Join-Path $runDir "frontend.err.log")
+$frontend = Start-Process -FilePath (Get-Command node).Source -ArgumentList (Quote-Arg $serverJs),"--dev","-H",$frontHost,"-p","43123" -WorkingDirectory $frontDir -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $runDir "frontend.log") -RedirectStandardError (Join-Path $runDir "frontend.err.log")
 Set-Content -Path (Join-Path $runDir "frontend.pid") -Value $frontend.Id
 Remove-Item Env:CHAT_ROOM_RUN
 $deadline = (Get-Date).AddSeconds(150)
