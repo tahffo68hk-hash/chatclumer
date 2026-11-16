@@ -5,18 +5,18 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_optional_hosts_do_not_get_a_static_content_script():
-    manifest = json.loads((ROOT / "extension" / "manifest.json").read_text())
+    manifest = json.loads((ROOT / "extension" / "manifest.json").read_text(encoding="utf-8"))
     matches = [item for block in manifest["content_scripts"] for item in block["matches"]]
     assert matches == ["http://127.0.0.1:43124/fixture/*", "https://gemini.google.com/*"]
     assert "scripting" in manifest["permissions"]
     assert "https://yuanbao.tencent.com/*" in manifest["optional_host_permissions"]
     assert "https://chatglm.cn/*" in manifest["optional_host_permissions"]
-    background = (ROOT / "extension" / "background.js").read_text()
-    popup = (ROOT / "extension" / "popup.js").read_text()
-    content = (ROOT / "extension" / "content.js").read_text()
+    background = (ROOT / "extension" / "background.js").read_text(encoding="utf-8")
+    popup = (ROOT / "extension" / "popup.js").read_text(encoding="utf-8")
+    content = (ROOT / "extension" / "content.js").read_text(encoding="utf-8")
     assert "registerContentScripts" in background
     assert "permissions.request" in popup
-    yuanbao_js = (ROOT / "extension" / "yuanbao.js").read_text()
+    yuanbao_js = (ROOT / "extension" / "yuanbao.js").read_text(encoding="utf-8")
     assert "结构取自协调方实页 2026-11-15" in yuanbao_js
     assert ".agent-chat__list__item--ai" in yuanbao_js
     assert ".hyc-common-markdown__ref-list" in yuanbao_js
@@ -33,8 +33,8 @@ def test_optional_hosts_do_not_get_a_static_content_script():
     assert "yuanbaoDispatchSend" in content
     assert "deepseekDispatchSend" in content
     assert "doubaoDispatchSend" in content
-    deepseek_js = (ROOT / "extension" / "deepseek.js").read_text()
-    doubao_js = (ROOT / "extension" / "doubao.js").read_text()
+    deepseek_js = (ROOT / "extension" / "deepseek.js").read_text(encoding="utf-8")
+    doubao_js = (ROOT / "extension" / "doubao.js").read_text(encoding="utf-8")
     assert "结构取自协调方实页 2026-11-15" in deepseek_js
     assert "textarea[placeholder='Message DeepSeek']" in deepseek_js
     assert ".bf38813a" in deepseek_js
@@ -52,8 +52,8 @@ def test_optional_hosts_do_not_get_a_static_content_script():
     remembered = popup.split("function rememberFields", 1)[1].split("}", 1)[0]
     assert "memberId" in remembered and "tabKey" in remembered
     assert "code" not in remembered
-    guest = (ROOT / "extension" / "guest.js").read_text()
-    registry = json.loads((ROOT / "extension" / "adapters" / "registry.json").read_text())
+    guest = (ROOT / "extension" / "guest.js").read_text(encoding="utf-8")
+    registry = json.loads((ROOT / "extension" / "adapters" / "registry.json").read_text(encoding="utf-8"))
     for site in ("qwen", "chatgpt", "wenxin", "zhipu", "zai"):
         assert registry["sites"][site]["engine"] == "guest"
     assert "document.body" not in guest
@@ -69,7 +69,7 @@ def test_optional_hosts_do_not_get_a_static_content_script():
     assert "本机服务" in popup
     assert "选择要绑定的网页成员" in popup
     assert "未选择不会显示成已绑定" in popup
-    popup_html = (ROOT / "extension" / "popup.html").read_text()
+    popup_html = (ROOT / "extension" / "popup.html").read_text(encoding="utf-8")
     assert "选择成员" in popup_html
     assert 'url.startsWith("https://chat.baidu.com/")) return "wenxin"' in content
     assert '"https://chat.baidu.com",' in background

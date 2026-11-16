@@ -346,7 +346,7 @@ def test_editor_state_not_dom_text_enables_send_and_cards_are_not_clicked():
 
 
 def test_binding_and_heartbeat_do_not_click_recommendation_cards():
-    background = (ROOT / "extension" / "background.js").read_text()
+    background = (ROOT / "extension" / "background.js").read_text(encoding="utf-8")
     beat = background.split("async function beat", 1)[1].split("async function poll", 1)[0]
     ensure = background.split("async function ensureScript", 1)[1].split("chrome.runtime.onMessage", 1)[0]
     assert ".click(" not in beat and "KeyboardEvent" not in beat and "dispatchEvent" not in beat

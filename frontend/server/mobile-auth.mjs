@@ -1,5 +1,6 @@
 // 手机/局域网访问的认证层。只在自定义 Node 服务器里使用，那里能看到真实的 socket 地址。
 // 不信任客户端发来的 X-Forwarded-For / X-Real-IP / Forwarded。
+import { spawnSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -11,6 +12,54 @@ const PUBLIC_PATHS = new Set(["/m/ping", "/m/pair", "/manifest.webmanifest", "/f
 const PUBLIC_PREFIXES = ["/icons/"];
 const LOCAL_ONLY = new Set(["/m/info", "/m/rotate"]);
 const STRIP_HEADERS = ["x-forwarded-for", "x-forwarded-host", "x-forwarded-proto", "x-forwarded-port", "x-real-ip", "forwarded"];
+
+const WINDOWS_RESTRICT = `
+$ErrorActionPreference = 'Stop'
+$path = $env:CHAT_ROOM_PRIVATE_FILE
+$acl = Get-Acl -LiteralPath $path
+$acl.SetAccessRuleProtection($true, $false)
+foreach ($rule in @($acl.Access)) { [void]$acl.RemoveAccessRule($rule) }
+$me = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
+$rule = New-Object System.Security.AccessControl.FileSystemAccessRule($me, 'Modify', 'Allow')
+[void]$acl.AddAccessRule($rule)
+Set-Acl -LiteralPath $path -AclObject $acl
+`;
+
+const WINDOWS_CHECK = `
+$ErrorActionPreference = 'Stop'
+$path = $env:CHAT_ROOM_PRIVATE_FILE
+$acl = Get-Acl -LiteralPath $path
+if (-not $acl.AreAccessRulesProtected) { exit 2 }
+$me = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+$rules = @($acl.Access)
+if ($rules.Count -ne 1) { exit 3 }
+$sid = $rules[0].IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value
+if ($sid -ne $me) { exit 4 }
+if ([string]$rules[0].AccessControlType -ne 'Allow') { exit 5 }
+exit 0
+`;
+
+function powershell(script, file) {
+  return spawnSync(
+    "powershell",
+    ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
+    { env: { ...process.env, CHAT_ROOM_PRIVATE_FILE: file } },
+  );
+}
+
+export function protectPrivateFile(file) {
+  if (process.platform !== "win32") {
+    fs.chmodSync(file, 0o600);
+    return;
+  }
+  const result = powershell(WINDOWS_RESTRICT, file);
+  if (result.status !== 0) throw new Error("没有收紧本机口令文件的权限");
+}
+
+export function fileIsOwnerOnly(file) {
+  if (process.platform !== "win32") return (fs.statSync(file).mode & 0o077) === 0;
+  return powershell(WINDOWS_CHECK, file).status === 0;
+}
 
 export function normalizeIp(addr) {
   if (!addr) return "";
@@ -99,7 +148,7 @@ export class TokenStore {
     const tmp = `${this.file}.${process.pid}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify({ token, created_at: new Date().toISOString() }) + "\n", { mode: 0o600 });
     fs.renameSync(tmp, this.file);
-    try { fs.chmodSync(this.file, 0o600); } catch { /* Windows */ }
+    protectPrivateFile(this.file);
     this.cache = null;
     this.mtime = -1;
     return this.read();

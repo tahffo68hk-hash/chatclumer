@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { COOKIE, FailLimiter, createMobileGate, isLoopback, lanAddresses, safeEqual, sessionValue } from "./mobile-auth.mjs";
+import { COOKIE, FailLimiter, createMobileGate, fileIsOwnerOnly, isLoopback, lanAddresses, safeEqual, sessionValue } from "./mobile-auth.mjs";
 
 const PORT = 43123;
 const PHONE = "192.168.1.23";
@@ -31,7 +31,7 @@ test("token is generated on first LAN start, URL-safe, >=128 bit, file is privat
   assert.match(token, /^[A-Za-z0-9_-]{43}$/);
   const file = path.join(dir, "mobile_token.json");
   assert.ok(fs.existsSync(file));
-  if (process.platform !== "win32") assert.equal(fs.statSync(file).mode & 0o077, 0);
+  assert.equal(fileIsOwnerOnly(file), true);
 });
 
 test("loopback requests pass through unauthenticated", () => {

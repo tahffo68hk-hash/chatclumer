@@ -25,19 +25,23 @@ def _run(args, env=None, check=False):
     merged = os.environ.copy()
     if env:
         merged.update(env)
-    return subprocess.run(args, cwd=ROOT, env=merged, text=True, capture_output=True, check=check)
+    return subprocess.run(args, cwd=ROOT, env=merged, text=True, encoding="utf-8", capture_output=True, check=check)
 
 
 def _fake_bin(directory: Path, name: str, body: str) -> None:
     path = directory / name
-    path.write_text(body)
+    path.write_text(body, encoding="utf-8")
     path.chmod(0o755)
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="install.sh 是 POSIX 安装器。Windows 检出不保留可执行位，Git Bash 也不能按冒号 PATH 跑这些假命令。Windows 安装由 install.ps1 的契约测试和 windows_loop.ps1 覆盖。",
+)
 def test_install_sh_dry_run_checks_versions_and_prints_chinese_steps():
     script = ROOT / "scripts" / "install.sh"
     assert script.stat().st_mode & stat.S_IXUSR
-    syntax = subprocess.run(["bash", "-n", str(script)], capture_output=True, text=True)
+    syntax = subprocess.run(["bash", "-n", str(script)], capture_output=True, text=True, encoding="utf-8")
     assert syntax.returncode == 0, syntax.stderr
     before = (ROOT / "backend" / ".venv").exists()
     result = _run(["bash", "scripts/install.sh", "--dry-run"])
@@ -66,6 +70,10 @@ def test_install_sh_dry_run_checks_versions_and_prints_chinese_steps():
     assert "后端仍只绑定 127.0.0.1，浏览器通过前端反代访问。" in lan.stdout
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="这组夹具是 POSIX shell 脚本，靠 bash 和冒号 PATH 假装 python/node。Windows 上会得到 UTF-16 的错误输出，不能说明安装器坏了。",
+)
 def test_install_sh_refuses_old_python_node_and_missing_npm(tmp_path):
     old_py = tmp_path / "oldpy"
     old_py.mkdir()
@@ -255,6 +263,10 @@ def test_release_workflow_builds_on_tags_and_keeps_desktop_optional():
 
 
 @pytest.mark.skipif(not NODE, reason="node not installed")
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="桌面壳夹具把缓存放在 /tmp，并用名为 npm 的可执行文件。Windows 默认入口是浏览器，不是这个未核实的原型。",
+)
 def test_desktop_host_and_preload_fixtures():
     env = os.environ.copy()
     cache = Path("/tmp/chatclumer-jsdom-25")

@@ -92,7 +92,9 @@ def iter_files(root: Path):
                 continue
             if not path.is_file():
                 continue
-            yield path, rel.as_posix()
+            # 归档名按 UTF-8 取，不跟当前 locale。LANG=C 时 os.walk 会给出 surrogate，直接 encode 会失败。
+            arc = "/".join(os.fsencode(part).decode("utf-8") for part in rel.parts)
+            yield path, arc
 
 
 def zip_info(arcname: str, path: Path) -> zipfile.ZipInfo:

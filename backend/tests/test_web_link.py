@@ -90,7 +90,7 @@ def test_extension_tab_heartbeat_rejects_another_site(tmp_path):
 def test_failed_web_reply_is_not_forwarded_until_the_next_run(tmp_path):
     from app.webbridge import WEB_JOB_WAIT_S
 
-    content = (Path(__file__).resolve().parents[2] / "extension" / "content.js").read_text()
+    content = (Path(__file__).resolve().parents[2] / "extension" / "content.js").read_text(encoding="utf-8")
     assert "readCap: 90000" in content
     assert WEB_JOB_WAIT_S >= 120
     assert WEB_JOB_WAIT_S > 90

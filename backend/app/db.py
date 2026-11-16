@@ -56,6 +56,10 @@ class Database:
         self.conn.execute("PRAGMA foreign_keys=ON")
         self._init()
 
+    def close(self) -> None:
+        with self._lock:
+            self.conn.close()
+
     def _init(self) -> None:
         self.conn.executescript(
             """

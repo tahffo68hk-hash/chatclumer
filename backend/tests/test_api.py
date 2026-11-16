@@ -1,9 +1,8 @@
-import os
-
 import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.main import create_app
+from app.secrets import private_file_is_owner_only
 
 
 async def wait_terminal(client, sid):
@@ -49,7 +48,7 @@ async def test_demo_room_flow_masks_secrets_and_does_not_restart(tmp_path, monke
         secret = await client.put("/api/secrets", json={"name": "OPENAI_API_KEY", "value": "sk-local-only-value"})
         assert secret.status_code == 200
         assert "sk-local-only-value" not in secret.text
-        assert oct(os.stat(tmp_path / "secrets.json").st_mode & 0o777) == "0o600"
+        assert private_file_is_owner_only(tmp_path / "secrets.json")
         status = (await client.get("/api/secrets/status")).json()
         assert status["secrets"]
         assert "sk-local-only-value" not in json_text(status)

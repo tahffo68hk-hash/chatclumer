@@ -66,7 +66,8 @@ def test_token_file_is_gitignored():
 def test_frontend_mobile_gate_node_suite():
     out = subprocess.run(
         ["node", "--test", "server/mobile-auth.test.mjs"],
-        cwd=ROOT / "frontend", capture_output=True, text=True, timeout=120,
+        cwd=ROOT / "frontend", capture_output=True, text=True, encoding="utf-8", timeout=120,
     )
     assert out.returncode == 0, out.stdout[-3000:] + out.stderr[-2000:]
-    assert re.search(r"# fail 0", out.stdout)
+    # Node 在非 TTY 下可能用 spec（ℹ fail 0）或 TAP（# fail 0）。两种都表示没有失败。
+    assert re.search(r"(?:#|ℹ) fail 0\b", out.stdout)

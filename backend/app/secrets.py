@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 from pathlib import Path
 
 ALLOWED_SECRET_NAMES = (
@@ -30,6 +31,60 @@ ALLOWED_SECRET_NAMES = (
 )
 
 ALLOW_PAID_NAME = "ALLOW_PAID_PROVIDERS"
+
+# 去掉继承来的权限，只留当前用户。路径从环境变量读，避免进命令行。
+_WINDOWS_RESTRICT = r"""
+$ErrorActionPreference = 'Stop'
+$path = $env:CHAT_ROOM_PRIVATE_FILE
+$acl = Get-Acl -LiteralPath $path
+$acl.SetAccessRuleProtection($true, $false)
+foreach ($rule in @($acl.Access)) { [void]$acl.RemoveAccessRule($rule) }
+$me = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
+$rule = New-Object System.Security.AccessControl.FileSystemAccessRule($me, 'Modify', 'Allow')
+[void]$acl.AddAccessRule($rule)
+Set-Acl -LiteralPath $path -AclObject $acl
+"""
+
+_WINDOWS_CHECK = r"""
+$ErrorActionPreference = 'Stop'
+$path = $env:CHAT_ROOM_PRIVATE_FILE
+$acl = Get-Acl -LiteralPath $path
+if (-not $acl.AreAccessRulesProtected) { exit 2 }
+$me = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+$rules = @($acl.Access)
+if ($rules.Count -ne 1) { exit 3 }
+$sid = $rules[0].IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value
+if ($sid -ne $me) { exit 4 }
+if ([string]$rules[0].AccessControlType -ne 'Allow') { exit 5 }
+exit 0
+"""
+
+
+def _powershell(script: str, path: Path) -> subprocess.CompletedProcess:
+    env = os.environ.copy()
+    env["CHAT_ROOM_PRIVATE_FILE"] = str(path)
+    return subprocess.run(
+        ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
+        capture_output=True,
+        env=env,
+        check=False,
+    )
+
+
+def protect_private_file(path: Path) -> None:
+    """POSIX 用 0600。Windows 的 chmod 不改变 ACL，所以改成只允许当前用户修改。"""
+    if os.name != "nt":
+        os.chmod(path, 0o600)
+        return
+    result = _powershell(_WINDOWS_RESTRICT, path)
+    if result.returncode != 0:
+        raise OSError("没有收紧密钥文件权限")
+
+
+def private_file_is_owner_only(path: Path) -> bool:
+    if os.name != "nt":
+        return (path.stat().st_mode & 0o777) == 0o600
+    return _powershell(_WINDOWS_CHECK, path).returncode == 0
 
 
 class SecretStore:
@@ -91,6 +146,6 @@ class SecretStore:
         except Exception:
             os.close(fd)
             raise
-        os.chmod(tmp, 0o600)
+        protect_private_file(tmp)
         os.replace(tmp, self.path)
-        os.chmod(self.path, 0o600)
+        protect_private_file(self.path)

@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import shutil
 import sys
 import tempfile
 import time
@@ -89,7 +90,9 @@ async def judge(judge_provider, judge_member: dict, question: str, answer: str) 
 
 
 async def evaluate(members: list[dict], provider, label: str, rounds: int = 3, timeout: float = 120, judge_member: dict | None = None, judge_provider=None, limit: int | None = None) -> dict:
-    with tempfile.TemporaryDirectory() as tmp:
+    tmp = tempfile.mkdtemp()
+    db = None
+    try:
         db = Database(str(Path(tmp) / "eval.db"))
         engine = RoomEngine(db, provider)
         items = []
@@ -107,7 +110,11 @@ async def evaluate(members: list[dict], provider, label: str, rounds: int = 3, t
                 item["single"]["judge"] = await judge(judge_provider, judge_member, q["question"], single_answer)
                 item["group"]["judge"] = await judge(judge_provider, judge_member, q["question"], group_answer)
             items.append(item)
-    return {"label": label, "created_at": datetime.now(timezone.utc).isoformat(), "members": [{k: m.get(k) for k in ("nickname", "provider", "model_id")} for m in members], "rounds": rounds, "items": items, "totals": totals(items)}
+        return {"label": label, "created_at": datetime.now(timezone.utc).isoformat(), "members": [{k: m.get(k) for k in ("nickname", "provider", "model_id")} for m in members], "rounds": rounds, "items": items, "totals": totals(items)}
+    finally:
+        if db is not None:
+            db.close()
+        shutil.rmtree(tmp)
 
 
 def totals(items: list[dict]) -> dict:

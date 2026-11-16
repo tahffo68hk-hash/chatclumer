@@ -28,7 +28,14 @@ def validate(data, ext="0.5.2"):
         "const s=require(process.argv[1]);let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{"
         "console.log(JSON.stringify(s.validateRegistry(JSON.parse(d),process.argv[2])))})"
     )
-    out = subprocess.run([NODE, "-e", script, str(SCHEMA), ext], input=json.dumps(data), capture_output=True, text=True, check=True)
+    out = subprocess.run(
+        [NODE, "-e", script, str(SCHEMA), ext],
+        input=json.dumps(data),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
+    )
     return json.loads(out.stdout)
 
 
@@ -45,14 +52,14 @@ def test_registry_covers_every_adapted_site():
     assert set(data["sites"]) == {"qwen", "chatgpt", "wenxin", "zhipu", "zai", "deepseek", "doubao", "yuanbao"}
     for site in data["sites"].values():
         assert site["roles"]["composer"] and site["roles"]["send"]
-    manifest = json.loads((ROOT / "extension" / "manifest.json").read_text())
+    manifest = json.loads((ROOT / "extension" / "manifest.json").read_text(encoding="utf-8"))
     have = tuple(int(part) for part in manifest["version"].split("."))
     need = tuple(int(part) for part in data["min_extension"].split("."))
     assert have >= need
 
 
 def test_guest_js_has_no_inline_selectors_left():
-    guest = (ROOT / "extension" / "guest.js").read_text()
+    guest = (ROOT / "extension" / "guest.js").read_text(encoding="utf-8")
     for marker in ("textarea#chat-textarea", "qwen-chat-message-user", "data-composer-submit", "row-answer-", "chat-markdown"):
         assert marker not in guest
 
@@ -127,9 +134,9 @@ def test_registry_cache_is_stale_after_extension_or_bundled_change():
         "const c={extension:'0.5.2',bundled:'2026.11.15.3',url:'https://x/r.json',everyMs:6*3600e3,now};"
         "console.log(JSON.stringify([f(st,c),f({...st,bundled:'2026.11.15.1'},c),f({...st,extension:'0.5.0'},c),"
         "f({...st,url:'https://y'},c),f({...st,checked_at:'2026-11-14T20:00:00Z'},c),f(null,c),"
-        "f({detail:'远端 2026.11.15.1 不比内置 2026.11.15.1 新',checked_at:'2026-11-15T05:00:00Z'},c)]))"
+        "f({detail:'\\u8fdc\\u7aef 2026.11.15.1 \\u4e0d\\u6bd4\\u5185\\u7f6e 2026.11.15.1 \\u65b0',checked_at:'2026-11-15T05:00:00Z'},c)]))"
     )
-    out = subprocess.run([NODE, "-e", script, str(SCHEMA)], capture_output=True, text=True, check=True)
+    out = subprocess.run([NODE, "-e", script, str(SCHEMA)], capture_output=True, text=True, encoding="utf-8", check=True)
     # 同版本、同内置、同地址、未过期才算新鲜；0.5.0 留下的旧状态（没有版本字段）一律过时。
     assert json.loads(out.stdout) == [True, False, False, False, False, False, False]
 
