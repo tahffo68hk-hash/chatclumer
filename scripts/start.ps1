@@ -59,6 +59,17 @@ $token = [guid]::NewGuid().ToString("N")
 Set-Content -Path (Join-Path $runDir "instance.token") -Value $token -NoNewline
 $env:CHAT_ROOM_RUN = $token
 $serverJs = Join-Path $frontDir "server\index.mjs"
+function Test-InTree([int]$ProcessId, [int]$RootId) {
+  $cursor = $ProcessId
+  for ($i = 0; $i -lt 8; $i++) {
+    if ($cursor -eq $RootId) { return $true }
+    $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$cursor" -ErrorAction SilentlyContinue
+    if (-not $proc) { return $false }
+    $cursor = [int]$proc.ParentProcessId
+  }
+  return $false
+}
+
 # Start-Process 把 -ArgumentList 拼成一条命令行且不加引号，路径里有空格时要自己加。
 function Quote-Arg([string]$Value) {
   if ($Value -match '[\s"]') { return '"' + ($Value -replace '"', '\"') + '"' }
@@ -74,25 +85,13 @@ $deadline = (Get-Date).AddSeconds(150)
 do {
   $backPid = Get-ListenerPid 43124
   $frontPid = Get-ListenerPid 43123
-  if ($backPid -and $backPid -ne $backend.Id) {
-    Write-Error "端口 43124 被 PID $backPid 占用，不是本次启动的后端。不会把它当作已就绪。"
+  # uvicorn.exe 和 node 都可能再拉起子进程（python.exe、next-server），监听者可以是本次启动进程的子孙，
+  # 但不能是启动前就存在的其他进程。
+  if ($backPid -and -not (Test-InTree $backPid $backend.Id)) {
+    Write-Error "端口 43124 被 PID $backPid 占用，不是本次启动的后端进程树。不会把它当作已就绪。"
   }
-  if ($frontPid -and $frontPid -ne $frontend.Id) {
-    # next 会再拉起 next-server，监听者可以是其子进程，不能是启动前就存在的进程。
-    $started = @($backend.Id, $frontend.Id)
-    if ($started -notcontains $frontPid) {
-      $childOk = $false
-      $cursor = $frontPid
-      for ($i = 0; $i -lt 8; $i++) {
-        $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$cursor" -ErrorAction SilentlyContinue
-        if (-not $proc) { break }
-        if ($proc.ParentProcessId -eq $frontend.Id) { $childOk = $true; break }
-        $cursor = $proc.ParentProcessId
-      }
-      if (-not $childOk) {
-        Write-Error "端口 43123 被 PID $frontPid 占用，不是本次启动的前端进程树。不会把它的 HTTP 响应当作已就绪。"
-      }
-    }
+  if ($frontPid -and -not (Test-InTree $frontPid $frontend.Id)) {
+    Write-Error "端口 43123 被 PID $frontPid 占用，不是本次启动的前端进程树。不会把它的 HTTP 响应当作已就绪。"
   }
   try {
     $back = (Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 "http://127.0.0.1:43124/api/health").Content

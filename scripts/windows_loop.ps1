@@ -33,8 +33,11 @@ function Assert-PortsFree {
 }
 
 function Invoke-Step([string]$File) {
-  & powershell -NoProfile -ExecutionPolicy Bypass -File $File | Out-Host
-  return $LASTEXITCODE
+  # 不用管道：start.ps1 拉起的后台进程会继承管道句柄，管道永远不结束。只等这个 powershell 本身退出。
+  $p = Start-Process -FilePath "powershell" -ArgumentList "-NoProfile","-ExecutionPolicy","Bypass","-File",('"' + $File + '"') -NoNewWindow -PassThru
+  $null = $p.Handle  # 先取句柄，否则 PowerShell 5.1 里 ExitCode 可能为空
+  $p.WaitForExit()
+  return $p.ExitCode
 }
 
 if (Test-Path -LiteralPath $dest) {
@@ -88,7 +91,7 @@ try {
   }
   $stop = Join-Path $dest "scripts\stop.ps1"
   if (Test-Path -LiteralPath $stop) {
-    & powershell -NoProfile -ExecutionPolicy Bypass -File $stop
+    [void](Invoke-Step $stop)
   }
   throw
 } finally {
